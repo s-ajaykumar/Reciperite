@@ -14,18 +14,62 @@ database = client.get_database_client("Receipe")
 
 container = database.get_container_client("users")
 
-query = "SELECT * FROM c WHERE c.user_id = 'c09b219b-16b6-46f4-a34e-e73b2b8ada62' AND c.id != 'user_details' ORDER BY c.id DESC"
+item = container.read_item(item='20250523T192100Z', partition_key='ef6d4915-ef45-4491-b604-fc729413af80')
+item['conversations'].extend(["user : I dont have egg\n"])
+container.replace_item(item='20250523T192100Z', body=item)  # Update the item with new conversation
+
+query = "SELECT * FROM c WHERE c.user_id = 'ef6d4915-ef45-4491-b604-fc729413af80' AND c.id != 'user_details' ORDER BY c.id DESC OFFSET 0 LIMIT 1"
 items = list(container.query_items(
     query=query
 ))
+print(items[0]['conversations'], items[0]['id'])  # Returns the last conversation and its id
+
+
+'''item = container.read_item(item = 'user_details1', partition_key = 'c09b219b-16b6-46f4-a34e-e73b2b8ada62')
+print(item['details'])'''
+
+
+'''update_item = {
+            "name": "Chandru",
+            "gender": "female",
+            "age": 23,
+            "weight": "40Kgs",
+            "height": "150cms",
+            "country": "India",
+            "state": "Tamil Nadu",
+            "diet": "Non - Vegetarian",
+            "activity_level": "more active",
+            "meal_schedule": 3
+            }
+for key, value in update_item.items():
+    item['details'][key] = value
+print(item['details'])
+item = container.replace_item(item = 'user_details', body = item)'''
+
+
+'''user_ids = ["ef6d4915-ef45-4491-b604-fc729413af80", "c09b219b-16b6-46f4-a34e-e73b2b8ada62"] 
+items = [
+    {
+        "id": "user_details",
+        "user_id": user_ids[1],
+        "details" : {
+            "name": "Chandru",
+            "gender": "female",
+            "age": 22,
+            "weight": "40Kgs",
+            "height": "150cms",
+            "country": "India",
+            "state": "Tamil Nadu",
+            "diet": "Non - Vegetarian",
+            "activity_level": "more active",
+            "meal_schedule": 3
+            }
+    }   
+]
 for item in items:
-    date = item['id']
-    print(date)
-    [print(i) for i in item['conversations']]
+    container.create_item(body = item)
     
-       
-user_ids = ["ef6d4915-ef45-4491-b604-fc729413af80", "c09b219b-16b6-46f4-a34e-e73b2b8ada62"] 
-'''items = [
+items = [
     {
         "id" : "20250523T181100Z",     # timestamp
         "user_id" : user_ids[0],
@@ -58,3 +102,5 @@ for item in items:
 with open("user_ids.txt", "w") as f:
     for user_id in user_ids:
         f.write(user_id + "\n")'''
+        
+    

@@ -1,10 +1,8 @@
 import os
-import time
-import asyncio
 from fastapi import FastAPI
+from datetime import datetime
 from dotenv import load_dotenv
 from dataclasses import dataclass
-from azure.core.exceptions import AzureError
 from azure.cosmos import CosmosClient, PartitionKey
 
 load_dotenv()
@@ -16,7 +14,7 @@ response_template = {
     "response": ""
 }
 # Task: Determine if the user is new or continuing the conversation
-1. Compare the current conversation with the previous conversation and if the user is new, assign "new" to response_template["response"] or if the user continues the previous conversation, then assign "continue" to response_template["response"]. Don't assign anything other than these.
+1. Compare the current conversation with the previous conversation and if the user initiates a new conversation, then assign "new" to response_template["response"] or if the user continues the previous conversation, then assign "continue" to response_template["response"]. Don't assign anything other than these.
 2. Perform the task and return the json file.
 \n 
 """
@@ -28,12 +26,10 @@ response_template = {
 tasks = [create a food plan, create a recipe, others]
 
 # Task
-1. If the conversation is related to any of the above tasks then assign the task's index to the response_template["response"]. Don't assign anything to it other than the mentioned. Note that index starts from 0.
+1. The conversation is related to any one of the above tasks. So identify the task's index related to the conversation and assign the task's index to the response_template["response"]. Don't assign anything to it other than the mentioned. Note that index starts from 0.
 2. Perform the task and return the json file.
 """
 create_food_plan = """response_template = {
-id : ""
-user_input : "",
 response : "",
 update_details : "None"
 }
@@ -67,13 +63,12 @@ class Config:
     DB_CONNECTION_STRING = os.environ["DB_CONNECTION_STRING"]
     
     
-def new_or_continue_func(curr_conv, both_conv):
+def new_or_continue_func(both_conv):
     out = call_ai(prompt = new_or_continue, inputs = both_conv)
     if out["response"] == "new":
-        text = curr_conv
+        config.is_continuing_conversation = False
     else:
-        text = both_conv
-    return text
+        config.is_continuing_conversation = True
 
 
 class AI:
@@ -98,34 +93,44 @@ class db:
         client = CosmosClient.from_connection_string(connection_string)
         self.database = client.get_database_client("Receipe")
         self.container = self.database.get_container_client("users")
-        self.item_id1 = "user_details"
-        self.item_id2 = "user_conversations"
+        self.item_id = "user_details"
         
-    def get_user_details(self, user_id):
-        item = self.container.read_item(item = self.item_id1, partition_key = user_id)
-        return str(item)
+    async def get_user_details(self):
+        item = self.container.read_item(item = self.item_id, partition_key = config.user_id)
+        return item['details']  # Returns user details as a json
     
-    async def get_prev_conversation(self, user_id):
-        query = f"SELECT * FROM c WHERE c.user_id = '{user_id}' AND c.id = '{self.item_id2}'"
+    async def get_prev_conversation(self):
+        query = f"SELECT * FROM c WHERE c.user_id = '{config.user_id}' AND c.id != '{self.item_id}' ORDER BY c.id DESC OFFSET 0 LIMIT 1"
         items = list(self.container.query_items(
             query=query
         ))
-        return str(items[0])
+        if not items:
+            return None
+        else:
+            self.prev_conv_id = items[0]['id']  
+            return ''.join(items[0]['conversations'])   # Returns a string of the previous conversation
         
-    def update_user_details(self, update_details):
-        # Partition key and ID of the item to update
-        partition_key = "1"
-        item_id = "1"
-
-        # Step 1: Read the item
-        item = self.container.read_item(item=item_id, partition_key=partition_key)
-
-        # Step 2: Modify the fields
-        item['email'] = "new_email@example.com"
-        item['status'] = "active"
-
-        # Step 3: Replace the item
-        self.container.replace_item(item=item_id, body=item)
+    async def update_user_details(self, update_details):
+        item = self.container.read_item(item = self.item_id, partition_key = config.user_id)  # Ensure the item exists
+        for key, value in update_details.items():
+            item['details'][key] = value
+        self.container.replace_item(item=self.item_id, body = item)
+        
+    async def create_new_conversation(self, user_input, ai_response):
+        item = {
+            "id": datetime.now().strftime('%Y%m%dT%H%M%SZ'),  # Unique ID based on current timestamp
+            "user_id": config.user_id,
+            "conversations": [user_input, ai_response]
+        }
+        self.container.create_item(body=item)
+        
+    async def update_conversation(self, user_input, ai_response):
+        if not config.is_continuing_conversation:
+            self.create_new_conversation(user_input, ai_response)
+        else:
+            item = self.container.read_item(item = config.prev_conv_id, partition_key = config.user_id)
+            item['conversations'].extend([user_input, ai_response])  # Append new conversation
+            self.container.replace_item(item = config.prev_conv_id, body=item)
 
 
 class task_router:
@@ -133,56 +138,63 @@ class task_router:
         self.prompts = prompts
         self.route_task_prompt = route_task_prompt
         
-    def __call__(self, user_id, text):
-        out = call_ai(prompt = self.route_task_prompt, inputs = text)
+    async def __call__(self, text, user_details):
+        self.text = text
+        out = call_ai(prompt = self.route_task_prompt, inputs = self.text)
         idx = int(out["response"])
+        input = "user_details :\n" + user_details + "\n\n" + self.text
         
         if idx == 2:
             return call_ai.tts("Sorry! I can't help with that.")
         elif idx == 0:
-            text = db_ops.get_user_details(user_id) + "\n\n" + text
-            out = self.food_planner(self.prompts[idx], text)
+            out = await self.food_planner(self.prompts[idx], input)
             return out
         elif idx == 1:
-            text = db_ops.get_user_details(user_id) + "\n\n" + text
-            out = self.recipe_creator(self.prompts[idx], text)
+            out = self.recipe_creator(self.prompts[idx], input)
             return out
 
-    def food_planner(prompt, text):
-        out = call_ai.ttt(prompt = prompt, inputs = text)
-        out = call_ai.tts(out["response"])  # Returns mp3 file
-        
+    async def food_planner(self, prompt, input):
+        out = call_ai.ttt(prompt = prompt, inputs = input)
         if out["update_details"] != "None":
-            db_ops.update_user_details(out["update_details"])
+            await db_ops.update_user_details(out["update_details"])
         return out 
     
-    def recipe_creator(prompt, text):
-        out = call_ai(prompt = prompt, inputs = text)
-        out = call_ai.tts(out["response"])  # Returns mp3 file
+    def recipe_creator(self, prompt, input):
+        out = call_ai(prompt = prompt, inputs = input)
         return out
 
 
-# Initialize AI and database
+# Initialize server, AI and database
+app = FastAPI()
 config = Config()
 call_ai = AI(config.ttt_endpoint, config.ttt_key, config.stt_endpoint, config.stt_key, config.tts_endpoint, config.tts_key)
 db_ops = db(config.DB_CONNECTION_STRING)   
 route_task = task_router(prompts, route_task_prompt)
 
 
-app = FastAPI()
-
 @app.post('/call/{user_id}/{input}')        # input : mp3 format
 async def call(user_id : int, mp3_file):
+    config.user_id = user_id
+    
     # Converting speech-to-text and getting previous timestep conversation asynchronously
     text = await call_ai.stt(mp3_file)                 
-    prev_conversation = await db_ops.get_prev_conversation(user_id) 
+    prev_conversation = await db_ops.get_prev_conversation()
+    user_details = await db_ops.get_user_details()
+    text = "user : " + text
     
-    # Checking if the user initiates new or continuing the conversation and processing it
-    modified_text = "previous conversation :\n" + prev_conversation + "\n" + "current conversation:\n" + "user : " + text
-    text = new_or_continue_func(text, modified_text)
-    
-    # Routing the conversation to the appropriate task
-    out = route_task(user_id, text)    # Returns mp3 file
+    if not prev_conversation:
+        out = await route_task(text, user_details)
+        await db_ops.create_new_conversation(text, "AI: " + out['response'])
+    else:
+        both_conv = "previous conversation :\n" + prev_conversation + "\n" + "current conversation:\n" +  text
+        new_or_continue_func(both_conv)
+        if not config.is_continuing_conversation:
+            out = await route_task(text, user_details)
+        else:
+            out = await route_task(both_conv, user_details)
+        await  db_ops.update_conversation(text, "AI: " + out['response'])
+        
+    out = call_ai.tts(out["response"])    # Returns mp3
     return out
     
     
