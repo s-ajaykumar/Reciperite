@@ -15,14 +15,17 @@ database = client.get_database_client("Receipe")
 container = database.get_container_client("users")
 
 item = container.read_item(item='20250523T192100Z', partition_key='ef6d4915-ef45-4491-b604-fc729413af80')
-item['conversations'].extend(["user : I dont have egg\n"])
+item[id] = '20250523T192101Z'  # Update the id if needed
+print(item)
+
+'''item['conversations'].extend(["user : I dont have egg\n"])
 container.replace_item(item='20250523T192100Z', body=item)  # Update the item with new conversation
 
 query = "SELECT * FROM c WHERE c.user_id = 'ef6d4915-ef45-4491-b604-fc729413af80' AND c.id != 'user_details' ORDER BY c.id DESC OFFSET 0 LIMIT 1"
 items = list(container.query_items(
     query=query
 ))
-print(items[0]['conversations'], items[0]['id'])  # Returns the last conversation and its id
+print(items[0]['conversations'], items[0]['id'])  # Returns the last conversation and its id'''
 
 
 '''item = container.read_item(item = 'user_details1', partition_key = 'c09b219b-16b6-46f4-a34e-e73b2b8ada62')
