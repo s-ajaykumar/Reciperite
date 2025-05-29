@@ -1,0 +1,3 @@
+Requirement already satisfied: protobuf in ./.venv/lib/python3.12/site-packages (4.24.4)
+Collecting protobuf
+  Using cached protobuf-6.31.1-cp39-abi3-macosx_10_9_universal2.whl.metadata (593 bytes)
