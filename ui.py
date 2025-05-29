@@ -3,6 +3,8 @@ import requests
 import websocket
 import threading
 import base64
+import tempfile
+import json
 
 #BACKEND_URL = "http://127.0.0.1:8000/call/{user_id}/input"
 
@@ -26,7 +28,8 @@ class WS:
         self.ws.run_forever()
         
     def on_message(self, ws, message):
-        self.logs += message + "\n\n"
+        message = json.loads(message)
+        self.logs += message['log'] + "\n\n"
     
     def on_error(self, ws, error):
         self.logs += f"Websocket Error: {error}\n\n"
@@ -38,11 +41,18 @@ class WS:
 def update_logs():
     return ws.logs
 
-def call_server(user_id, audio_path):
-    with open(audio_path, "rb") as f:
+
+def call_server(user_id, audio_input):
+    with open(audio_input, "rb") as f:
         audio = base64.b64encode(f.read()).decode('utf-8')
     out = requests.post('http://127.0.0.1:8000/call', json = {'user_id' : user_id, 'audio': audio})
-    return out
+    out = out.json()
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=f'.wav') as temp_file:
+            temp_file.write(base64.b64decode(out['response_audio']))
+            temp_file_path = temp_file.name
+    return out['response_text'], temp_file_path
+       
             
 def gradio_ui():
     with gr.Blocks() as demo:
@@ -50,7 +60,13 @@ def gradio_ui():
         with gr.Row():
             with gr.Column():
                     user_id = gr.Textbox(label="User ID")
-                    audio_path = gr.Audio(type="filepath", label="Speak your request")
+                    audio_input = gr.Audio(type="filepath", label="Speak your request")
+                    text_output = gr.Textbox(
+                        label="AI Response",
+                        placeholder="AI's response will be displayed here",
+                        lines=5,
+                        interactive=False
+                    )
                     audio_output = gr.Audio(label="AI Response (audio)", type="filepath")
             with gr.Column():
                 log_box = gr.Textbox(
@@ -60,14 +76,17 @@ def gradio_ui():
                     value = ws.logs,
                     interactive=False
                     ) 
-                demo.load(update_logs, outputs = [log_box], every = 1)  
+        timer = gr.Timer(0.1)  # Update every 1 second
+        timer.tick(update_logs, outputs=[log_box])
+                
                      
-        audio_path.change(
+        audio_input.change(
             fn = call_server,
-            inputs = [user_id, audio_path],
-            outputs = [audio_output]
+            inputs = [user_id, audio_input],
+            outputs = [text_output, audio_output]
             )
     return demo
+
 
 if __name__ == "__main__":
     ws = WS()
