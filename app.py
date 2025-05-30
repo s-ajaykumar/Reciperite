@@ -8,11 +8,10 @@ from datetime import datetime
 from dotenv import load_dotenv
 from dataclasses import dataclass
 from azure.cosmos import CosmosClient
-import assemblyai as aai
-from murf import Murf
 import base64
 import time
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 load_dotenv()
 
@@ -41,9 +40,7 @@ class ServerResponse(BaseModel):
 @dataclass
 class Config:
     DB_CONNECTION_STRING = os.environ["DB_CONNECTION_STRING"]
-    GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
-    ASSEMBLY_AI_API_KEY = os.environ["ASSEMBLY_AI_API_KEY"]
-    MURF_API_KEY = os.environ["MURF_API_KEY"]
+    #GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
 
 
 async def save_audio_out(out):
@@ -53,41 +50,64 @@ async def save_audio_out(out):
             
             
 class AI:
-    def __init__(self, ttt_key, stt_key, tts_key):
-        genai.configure(api_key=ttt_key)
-        self.ttt_model = genai.GenerativeModel("gemini-2.5-flash-preview-native-audio-dialog")
+    def __init__(self):
+        self.client = genai.Client()
         
-        aai.settings.api_key =  stt_key
-        config = aai.TranscriptionConfig(speech_model=aai.SpeechModel.best)
-        self.transcriber = aai.Transcriber(config=config)
-        
-        self.tts_client = Murf(
-            api_key=tts_key,
+        self.ttt_model = "gemini-2.5-flash-preview-05-20"
+        self.ttt_config = types.GenerateContentConfig(
+            temperature=0,
+            thinking_config = types.ThinkingConfig(
+                thinking_budget=0,
+            ),
+            response_mime_type="application/json",
         )
         
     async def ttt(self, text):
         t1 = time.time()
-        
         await ws.send_log(text)
-        # Generate content
-        response = self.ttt_model.generate_content(
-            text,
-            generation_config={
-                "temperature" : 0,
-                "response_mime_type": "application/json"
-            })
-        print(response.text)
         
+        contents = [
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_text(text=text),
+                ],
+            ),
+        ]
+        
+        response = self.client.models.generate_content(
+            model=self.ttt_model,
+            contents=contents,
+            config=self.ttt_config,
+        )
+        
+        await ws.send_log(json.loads(response.text))
+        
+        #Streaming response
+        '''for chunk in self.client.models.generate_content_stream(
+            model=self.ttt_model,
+            contents=contents,
+            config=self.ttt_config,
+        ):
+            print(chunk.text, end="")'''
+
         t2 = time.time()
         await ws.send_log(f"Time taken for TTT: {t2-t1:3f}sec {(t2 - t1)*1000:4f} ms")
         
-        return json.loads(response.text)   # Response json
+        return json.loads(response.text)['response']   # Response json
 
     async def stt(self, audio):
         t1 = time.time()
         audio = base64.b64decode(audio)
         await ws.send_log(f"Converting speech to text")
-
+        
+        contents=[
+            'Describe this audio clip',
+            types.Part.from_bytes(
+            data = audio_bytes,
+            mime_type='audio/mp3',
+            )
+        ]
         audio = genai.upload_file(
             path="/Users/outbell/Ajay/DeepLearning/GenAI/Reciperite/audio_outputs/20250528T142147Z.wav"
         )
@@ -192,7 +212,7 @@ class db:
 app = FastAPI()
 ws = WS()
 config = Config()
-call_ai = AI(config.GOOGLE_API_KEY, config.ASSEMBLY_AI_API_KEY, config.MURF_API_KEY)
+call_ai = AI()
 db_ops = db(config.DB_CONNECTION_STRING)   
 
 

@@ -50,7 +50,6 @@ import asyncio
 import sys
 import traceback
 import pyaudio
-import os
 from dotenv import load_dotenv
 from google import genai
 
@@ -74,7 +73,7 @@ RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE = 1024
 
 MODEL = "models/gemini-2.0-flash-live-001"
-CONFIG = {"system_instruction": prompts.instruction3.format(user_details = user_details), "response_modalities": ["AUDIO"]}
+CONFIG = {"system_instruction": prompts.instruction2.format(user_details = user_details), "response_modalities": ["AUDIO"]}
 
 pya = pyaudio.PyAudio()
 client = genai.Client(http_options={"api_version": "v1beta"})
@@ -83,22 +82,7 @@ class AudioLoop:
     def __init__(self):
         self.audio_in_queue = None
         self.out_queue = None
-
         self.session = None
-
-        self.send_text_task = None
-        self.receive_audio_task = None
-        self.play_audio_task = None
-
-    async def send_text(self):
-        while True:
-            text = await asyncio.to_thread(
-                input,
-                "message > ",
-            )
-            if text.lower() == "q":
-                break
-            await self.session.send(input=text or ".", end_of_turn=True)
 
     async def send_realtime(self):
         while True:
@@ -165,15 +149,11 @@ class AudioLoop:
                 self.audio_in_queue = asyncio.Queue()
                 self.out_queue = asyncio.Queue(maxsize=5)
 
-                send_text_task = tg.create_task(self.send_text())
                 tg.create_task(self.send_realtime())
                 tg.create_task(self.listen_audio())
 
                 tg.create_task(self.receive_audio())
                 tg.create_task(self.play_audio())
-
-                await send_text_task
-                raise asyncio.CancelledError("User requested exit")
 
         except asyncio.CancelledError:
             pass
