@@ -2,4 +2,5 @@ azure-cosmos
 fastapi
 python-dotenv
 uvicorn
-openai
+websockets
+google-genai

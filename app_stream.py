@@ -18,6 +18,7 @@ client = genai.Client(http_options={"api_version": "v1beta"})
 class WebSocketServer:
     def __init__(self):
         self.stt_ws = None
+        self.audio_ws = None
         self.audio_in_queue = None
         self.audio_out_queue = None
         self.text_queue = None
@@ -25,6 +26,8 @@ class WebSocketServer:
         self.client = None
         
     async def receive_client_audio(self, stream):
+        self.audio_ws = stream
+
         async for chunk in stream:
             await self.audio_in_queue.put(chunk)
      
@@ -75,17 +78,16 @@ class WebSocketServer:
                 
                 asyncio.create_task(self.send_audio())
                 asyncio.create_task(self.receive_text())
-                
+        
                 async with client.aio.live.connect(model=MODEL, config=AUDIO_CONFIG) as tts_ws:
                     self.tts_ws = tts_ws
                     asyncio.create_task(self.send_text())
                     asyncio.create_task(self.receive_ai_audio())
                     asyncio.create_task(self.send_audio_to_client())
                 
-                async with websockets.serve(self.receive_client_audio, 'localhost', 8000) as audio_ws:
-                    self.audio_ws = audio_ws
-                    print("server running on ws://localhost:8000")
-                    await asyncio.Future()
+                    async with websockets.serve(self.receive_client_audio, 'localhost', 8000) as audio_ws:
+                        print("server running on ws://localhost:8000")
+                        await asyncio.Future()
                     
         except Exception as e:
             print(f"An error occurred: {e}")

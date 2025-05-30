@@ -16,7 +16,7 @@ class AudioClient:
 
     async def receive_audio(self):
         while True:
-            data = self.ws.receive()
+            data = await self.ws.recv()
             self.response_queue.put_nowait(data)
     
     async def play_audio(self):
@@ -35,6 +35,9 @@ class AudioClient:
                 await asyncio.to_thread(stream.write, chunk)
         except Exception as e:
             print(f"An error occurred while playing audio: {e}")
+        finally:
+            stream.close()
+            stream.terminate()
      
     async def send_audio(self): 
         p = pyaudio.PyAudio()
@@ -45,9 +48,15 @@ class AudioClient:
                 input=True,
                 frames_per_buffer=CHUNK
             )
-        while True:
-            chunk = mic.read(CHUNK)
-            await self.ws.send(chunk)
+        try:
+            while True:
+                chunk = await asyncio.to_thread(mic.read, CHUNK)
+                await self.ws.send(chunk)
+        except Exception as e:
+            print(f"An error occurred while sending audio: {e}")
+        finally:
+            mic.close()
+            p.terminate()
                               
     async def main(self):
         try:
