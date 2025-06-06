@@ -3,8 +3,10 @@ instruction1 = """  # --> With response tmeplate --> can be used for text output
 {user_details}
 
 # CONVERSATIONS
-Previous conversation: 
+Previous conversations: 
 {prev_conv}
+Current user input:
+{curr_conv}
 
 # RESPONSE TEMPLATE:
 response_template = {{

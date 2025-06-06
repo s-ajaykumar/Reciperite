@@ -4,7 +4,7 @@ import pyaudio
 
 CHANNEL = 1
 FORMAT = pyaudio.paInt16
-IN_RATE = 24000
+IN_RATE = 16000
 OUT_RATE = 16000
 CHUNK = 1024
 
@@ -13,6 +13,7 @@ class AudioClient:
     def __init__(self):
         self.ws = None
         self.audio_in_queue = None
+        self.audio_out_queue = None
         self.pya  = pyaudio.PyAudio()
 
     async def receive_audio(self):
@@ -66,8 +67,7 @@ class AudioClient:
                 kwargs = {}
             while True:
                 chunk = await asyncio.to_thread(mic.read, CHUNK, **kwargs)
-                if chunk is not None:
-                    await self.audio_out_queue.put(chunk)
+                await self.audio_out_queue.put(chunk)
                 
         except Exception as e:
             print(f"An error occurred while listening audio: {e}")

@@ -5,7 +5,6 @@ from google.genai import types
 import websockets
 import asyncio
 import time
-
 from deepgram.utils import verboselogs
 from deepgram import (
     DeepgramClient,
@@ -15,13 +14,10 @@ from deepgram import (
 
 load_dotenv()
 
+
 user_details = {'name': 'ajay'}
 
 STT_MODEL = "models/gemini-2.0-flash-live-001"
-
-client = genai.Client(http_options={"api_version": "v1beta"})
-deepgram: DeepgramClient = DeepgramClient()
-
 STT_CONFIG = types.LiveConnectConfig(
     response_modalities=[
         "TEXT",
@@ -31,6 +27,10 @@ STT_CONFIG = types.LiveConnectConfig(
         role="user"
     ),
 )
+
+client = genai.Client(http_options={"api_version": "v1beta"})
+deepgram: DeepgramClient = DeepgramClient()
+
 
 
 def on_binary_data(self, data, **kwargs):

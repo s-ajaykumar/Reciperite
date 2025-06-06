@@ -1,3 +1,4 @@
 latency:
 kokoro : > 6 seconds (can process only 510 tokens at a time)
 google : >= 8 seconds
+deepgram : BEST
