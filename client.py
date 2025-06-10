@@ -8,13 +8,13 @@ IN_RATE = 16000
 OUT_RATE = 16000
 CHUNK = 1024
 
+pya  = pyaudio.PyAudio()
 
 class AudioClient:
     def __init__(self):
         self.ws = None
         self.audio_in_queue = None
         self.audio_out_queue = None
-        self.pya  = pyaudio.PyAudio()
 
     async def receive_audio(self):
         while True:
@@ -26,7 +26,7 @@ class AudioClient:
                 self.audio_in_queue.put_nowait(data)
     
     async def play_audio(self):
-        speaker = await asyncio.to_thread(self.pya.open,
+        speaker = await asyncio.to_thread(pya.open,
             format=FORMAT,
             channels=CHANNEL,
             rate=OUT_RATE,
@@ -53,12 +53,14 @@ class AudioClient:
             print(f"An error occurred while sending audio: {e}")
      
     async def listen_audio(self):
-        mic = await asyncio.to_thread(self.pya.open,
+        mic_info = pya.get_default_input_device_info()
+        mic = await asyncio.to_thread(pya.open,
                 format=FORMAT,
                 channels=CHANNEL,
                 rate=IN_RATE,
                 input=True,
-                frames_per_buffer=CHUNK
+                frames_per_buffer=CHUNK,
+                input_device_index = mic_info['index']
             )
         try:
             if __debug__:

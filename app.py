@@ -1,6 +1,6 @@
 import os
 import json
-import prompts
+import data.prompts as prompts
 import requests
 from pydantic import BaseModel
 from fastapi import FastAPI, WebSocket
