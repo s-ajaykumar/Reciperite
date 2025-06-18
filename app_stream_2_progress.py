@@ -4,7 +4,6 @@ from dotenv import load_dotenv
 import time
 import json
 import uuid
-import difflib
 import os
 
 import websockets
@@ -58,7 +57,12 @@ class ClientHandler:
         self.is_finals = []
         
     async def receive_stt_text(self, deepgram_self, result, **kwargs):
+        if result["type"] == "SpeechStarted":
+            print(f"Client {self.client_id} New Speech Started\n\n")
+            self.client_ws.send("New speech started")
+            
         sentence = result.channel.alternatives[0].transcript
+        print(sentence)
         
         if len(sentence) == 0:
             return
@@ -115,7 +119,7 @@ class ClientHandler:
                         types.Content(
                             role="user",
                             parts=[
-                                types.Part.from_text(text = prompts.instruction_1_modified.format(user_details = user_details, prev_conv = "", curr_conv = text)),
+                                types.Part.from_text(text = prompts.instruction.format(user_details = user_details, prev_conv = "", curr_conv = text)),
                             ],),]
                     response = await asyncio.to_thread(gemini.models.generate_content,
                         model = TTT_MODEL,
@@ -124,6 +128,11 @@ class ClientHandler:
                     )
                     t2 = time.time()
                     response = json.loads(response.text)
+                    
+                    if response['task'] == "create a food plan":
+                        if type(response['response']) is not str:
+                            response = response['response']['question']
+                            
                     response = response['response']
                     await self.text_out_queue.put(response)
                     print(f"Client: {self.client_id}\nTTT:\n{response}\nTIME TAKEN: {t2-t1:3f}s {(t2 - t1)*1000:4f} ms\n\n")
@@ -168,13 +177,13 @@ class ClientHandler:
             self.tts_connection = deepgram.speak.asyncwebsocket.v("1")
             
             self.stt_connection.on(LiveTranscriptionEvents.Transcript, lambda deepgram_self, result, **kwargs: self.receive_stt_text(deepgram_self, result, **kwargs))
-            #self.stt_connection.on(LiveTranscriptionEvents.UtteranceEnd, lambda deepgram_self, utterance_end, **kwargs: self.on_utterance_end(deepgram_self, utterance_end, **kwargs))
+            self.stt_connection.on(LiveTranscriptionEvents.UtteranceEnd, lambda deepgram_self, utterance_end, **kwargs: self.on_utterance_end(deepgram_self, utterance_end, **kwargs))
             self.tts_connection.on(SpeakWebSocketEvents.AudioData, lambda deepgram_self, data, **kwargs: self.receive_tts_audio(deepgram_self, data, **kwargs))
             
             stt_options = LiveOptions(model="nova-3", language="en-US", smart_format=True, encoding="linear16", channels=1, 
-                                    sample_rate=16000, interim_results=True, utterance_end_ms="3000", vad_events=True, endpointing=300,)
+                                    sample_rate=16000, vad_events=True, interim_results = True, utterance_end_ms = 1000, endpointing=300)
             
-            tts_options = SpeakWSOptions(model="aura-2-andromeda-en", encoding="linear16", sample_rate=16000,)
+            tts_options = SpeakWSOptions(model="aura-2-arcas-en", encoding="linear16", sample_rate=16000,)
             
             addons = {"no_delay": "true"}
             
@@ -210,7 +219,6 @@ class ClientHandler:
                 asyncio.create_task(self.ttt()),
                 asyncio.create_task(self.tts()),
                 asyncio.create_task(self.send_audio_to_client()),
-                #asyncio.create_task(self.is_speech_interrupted()),
                 ]
             
             done, pending = await asyncio.wait(tasks, return_when = asyncio.FIRST_COMPLETED)
@@ -263,7 +271,7 @@ class Server:
     async def start_tunnel(self):
         try:
             ngrok.set_auth_token(os.environ['NGROK_AUTH_TOKEN'])
-            self.tunnel = await ngrok.connect(8000, "http")
+            self.tunnel = await ngrok.connect(8080, "http", domain = "promoted-solid-gannet.ngrok-free.app")
             public_url = self.tunnel.url()
             ws_url = public_url.replace("http://", "ws://").replace("https://", "wss://")
             print(f"🌍 Server accessible publicly at: {ws_url}")
