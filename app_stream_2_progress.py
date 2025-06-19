@@ -57,13 +57,17 @@ class ClientHandler:
         self.is_finals = []
         
     async def receive_stt_text(self, deepgram_self, result, **kwargs):
-        if result["type"] == "SpeechStarted":
+        if hasattr(result, 'type') and result.type == "SpeechStarted":
             print(f"Client {self.client_id} New Speech Started\n\n")
-            self.client_ws.send("New speech started")
-            
-        sentence = result.channel.alternatives[0].transcript
-        print(sentence)
+            await self.client_ws.send("New speech started")
+            return
         
+        # Alternative approach - check if result has the expected transcript structure
+        if not hasattr(result, 'channel') or not result.channel or not hasattr(result.channel, 'alternatives'):
+            print(f"Client {self.client_id}: Invalid result structure")
+            return
+        
+        sentence = result.channel.alternatives[0].transcript
         if len(sentence) == 0:
             return
         
@@ -288,16 +292,16 @@ class Server:
             print("Ngrok tunnel stopped")
            
     async def main(self):
-        #public_ws_url = await self.start_tunnel()
+        public_ws_url = await self.start_tunnel()
         
         try:
             async with websockets.serve(self.handle_new_client, '0.0.0.0', 8080):
                 print("Server running on ws://0.0.0.0:8080")
                 
-                '''if public_ws_url:
+                if public_ws_url:
                         print(f"Clients can connect to: {public_ws_url}")
                 else:
-                    print("Local access only: ws://localhost:8000")'''
+                    print("Local access only: ws://localhost:8000")
                         
                 await asyncio.Future()
         
