@@ -29,7 +29,7 @@ user_details = {'name': 'ajay'}
 
 TTT_MODEL = "gemini-2.5-flash-preview-05-20"
 TTT_CONFIG = types.GenerateContentConfig(
-    temperature=0,
+    temperature=1,
     thinking_config = types.ThinkingConfig(
         thinking_budget=0,
     ),
@@ -57,16 +57,6 @@ class ClientHandler:
         self.is_finals = []
         
     async def receive_stt_text(self, deepgram_self, result, **kwargs):
-        if hasattr(result, 'type') and result.type == "SpeechStarted":
-            print(f"Client {self.client_id} New Speech Started\n\n")
-            await self.client_ws.send("New speech started")
-            return
-        
-        # Alternative approach - check if result has the expected transcript structure
-        if not hasattr(result, 'channel') or not result.channel or not hasattr(result.channel, 'alternatives'):
-            print(f"Client {self.client_id}: Invalid result structure")
-            return
-        
         sentence = result.channel.alternatives[0].transcript
         if len(sentence) == 0:
             return
@@ -77,6 +67,8 @@ class ClientHandler:
             if result.speech_final:
                 utterance = " ".join(self.is_finals)
                 await self.text_in_queue.put(utterance)
+                await self.client_ws.send("stop")
+                print("New Speech started, stopping previous STT\n\n")
                 print(f"Client {self.client_id}\nSTT:\n{utterance}\n\n")
                 self.is_finals = []
             
@@ -153,7 +145,7 @@ class ClientHandler:
             while True:
                 text = await self.text_out_queue.get()
                 if self.tts_connection:
-                    await self.tts_connection.send_text(text)
+                    await self.tts_connection.send_text(text[:700])
                     await self.tts_connection.flush()
                     print("Sent text to TTS connection\n\n\n\n")
                     
