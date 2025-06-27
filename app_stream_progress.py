@@ -5,10 +5,12 @@ import time
 import json
 import uuid
 import os
+import base64
 
 import websockets
 import ngrok
 import asyncio
+import requests
 
 from google import genai
 from google.genai import types
@@ -16,29 +18,35 @@ from google.genai import types
 from deepgram import (
     DeepgramClient,
     DeepgramClientOptions,
-    SpeakWebSocketEvents,
-    SpeakWSOptions,
     LiveTranscriptionEvents,
     LiveOptions,
 )
 
+
+
 load_dotenv()
 
 
-user_details = {'name': 'ajay'}
 
-TTT_MODEL = "gemini-2.5-flash-preview-05-20"
-TTT_CONFIG = types.GenerateContentConfig(
-    temperature=1,
-    thinking_config = types.ThinkingConfig(
-        thinking_budget=0,
-    ),
-    response_mime_type="application/json",
-)
-gemini = genai.Client()
 
-DEEPGRAM_CONFIG: DeepgramClientOptions = DeepgramClientOptions(options={"keepalive": "true"})
-deepgram: DeepgramClient = DeepgramClient("", DEEPGRAM_CONFIG)
+class Config:
+    user_details = {'name': 'ajay'}
+
+    TTT_MODEL = "gemini-2.5-flash-preview-05-20"
+    TTT_CONFIG = types.GenerateContentConfig(
+        temperature=1,
+        thinking_config = types.ThinkingConfig(
+            thinking_budget=0,
+        ),
+        response_mime_type="application/json",
+    )
+    gemini = genai.Client()
+
+    DEEPGRAM_CONFIG: DeepgramClientOptions = DeepgramClientOptions(options={"keepalive": "true"})
+    deepgram: DeepgramClient = DeepgramClient("", DEEPGRAM_CONFIG)
+config = Config()
+
+
 
 
   
@@ -49,6 +57,8 @@ class ClientHandler:
         self.client_ws = ws
         self.stt_connection = None
         self.tts_connection = None
+        
+        self.tts_input = None
         
         self.audio_in_queue = asyncio.Queue(maxsize = 100)
         self.audio_out_queue = asyncio.Queue(maxsize = 100)
@@ -66,24 +76,52 @@ class ClientHandler:
             
             if result.speech_final:
                 utterance = " ".join(self.is_finals)
-                await self.text_in_queue.put(utterance)
+                
+                print("New Speech started\n\n")
+                print("Clearing queues...", end = '')
                 await self.client_ws.send("stop")
-                print("New Speech started, stopping previous STT\n\n")
+                
+                while not self.text_in_queue.empty():
+                    await self.text_in_queue.get_nowait()
+                while not self.text_out_queue.empty():
+                    await self.text_out_queue.get_nowait()
+                while not self.audio_out_queue.empty():
+                    await self.audio_out_queue.get_nowait()
+                print("\tyes cleared")
+                    
+                await self.text_in_queue.put(utterance)
                 print(f"Client {self.client_id}\nSTT:\n{utterance}\n\n")
                 self.is_finals = []
             
     async def on_utterance_end(self, deepgram_self, utterance_end, **kwargs):
         if len(self.is_finals) > 0:
             utterance = " ".join(self.is_finals)
+            
+            print("New Speech started\n\n")
+            print("Clearing queues...", end = '')
+            await self.client_ws.send("stop")
+            
+            while not self.text_in_queue.empty():
+                await self.text_in_queue.get_nowait()
+            while not self.text_out_queue.empty():
+                await self.text_out_queue.get_nowait()
+            while not self.audio_out_queue.empty():
+                await self.audio_out_queue.get_nowait()
+            print("\tyes cleared")
+            
             await self.text_in_queue.put(utterance)
             print(f"Client: {self.client_id}\nSTT:\n{utterance}\n\n")
             self.is_finals = []
-                    
-    async def receive_tts_audio(self, deepgram_self, data, **kwargs):
-        self.audio_out_queue.put_nowait(data)
-     
-     
-     
+
+    async def on_tts_response(self):
+        while True:
+            response = await self.tts_connection.recv()
+            if response:
+                response = json.loads(response)
+                #response.
+                print(response)
+            
+    
      
     async def receive_client_audio(self):
         try:
@@ -115,23 +153,26 @@ class ClientHandler:
                         types.Content(
                             role="user",
                             parts=[
-                                types.Part.from_text(text = prompts.instruction.format(user_details = user_details, prev_conv = "", curr_conv = text)),
+                                types.Part.from_text(text = prompts.instruction.format(user_details = config.user_details, prev_conv = "", curr_conv = text)),
                             ],),]
-                    response = await asyncio.to_thread(gemini.models.generate_content,
-                        model = TTT_MODEL,
+                    response = await asyncio.to_thread(config.gemini.models.generate_content,
+                        model = config.TTT_MODEL,
                         contents = contents,
-                        config = TTT_CONFIG,
+                        config = config.TTT_CONFIG,
                     )
                     t2 = time.time()
                     response = json.loads(response.text)
+                    
+                    print(f"Client: {self.client_id}\nTTT:\n{response['response']}\nTIME TAKEN: {t2-t1:3f}s {(t2 - t1)*1000:4f} ms\n\n")
                     
                     if response['task'] == "create a food plan":
                         if type(response['response']) is not str:
                             response = response['response']['question']
                             
-                    response = response['response']
+                    response = {'task' : response['task'], 'response' : response['response']}
+                    await self.client_ws.send(response['response'])
                     await self.text_out_queue.put(response)
-                    print(f"Client: {self.client_id}\nTTT:\n{response}\nTIME TAKEN: {t2-t1:3f}s {(t2 - t1)*1000:4f} ms\n\n")
+                    
                     
                         
         except websockets.exceptions.ConnectionClosedOK:
@@ -144,10 +185,23 @@ class ClientHandler:
         try:
             while True:
                 text = await self.text_out_queue.get()
-                if self.tts_connection:
-                    await self.tts_connection.send_text(text[:700])
-                    await self.tts_connection.flush()
-                    print("Sent text to TTS connection\n\n\n\n")
+                
+                if text['task'] == 'create a recipe':
+                    self.tts_input['Text'] = text['response']
+                    payload = json.dumps(self.tts_input)
+                    response = self.tts_connection.send(payload)
+                    for chunk in response:
+                        #audio_bytes= base64.b64decode(chunk.audio_base_64)
+                        #response = json.dumps({'audio_bytes' : audio_by, 'alignment' : chunk.alignment, 'normalized_alignment' : chunk.normalized_alignment})
+                        self.audio_out_queue.put_nowait(response)
+                        print("Put json object")
+                        
+                elif text['task'] == 'unrelated':
+                    
+                    for chunk in response:
+                        self.audio_out_queue.put_nowait(chunk)
+                        
+
                     
         except Exception as e:
             print(f"TTS ERROR: {e}")
@@ -155,8 +209,16 @@ class ClientHandler:
     async def send_audio_to_client(self):
         try:
             while True:
-                audio_data = await self.audio_out_queue.get()
-                await self.client_ws.send(audio_data)
+                try:
+                    audio_data = await self.audio_out_queue.get()
+                except :
+                    print("couldn't get json from queue")
+                try:
+                    await self.client_ws.send(audio_data)
+                    print("sent json")
+                except:
+                    print("couldn't send json to client")
+                
         
         except websockets.exceptions.ConnectionClosed:
             print(f"Client {self.client_id} connection closed while sending audio")
@@ -169,31 +231,36 @@ class ClientHandler:
         
     async def setup_connections(self):
         try:
-            self.stt_connection = deepgram.listen.asyncwebsocket.v("1")
-            self.tts_connection = deepgram.speak.asyncwebsocket.v("1")
+            self.stt_connection = config.deepgram.listen.asyncwebsocket.v("1")
             
             self.stt_connection.on(LiveTranscriptionEvents.Transcript, lambda deepgram_self, result, **kwargs: self.receive_stt_text(deepgram_self, result, **kwargs))
             self.stt_connection.on(LiveTranscriptionEvents.UtteranceEnd, lambda deepgram_self, utterance_end, **kwargs: self.on_utterance_end(deepgram_self, utterance_end, **kwargs))
-            self.tts_connection.on(SpeakWebSocketEvents.AudioData, lambda deepgram_self, data, **kwargs: self.receive_tts_audio(deepgram_self, data, **kwargs))
             
+
             stt_options = LiveOptions(model="nova-3", language="en-US", smart_format=True, encoding="linear16", channels=1, 
                                     sample_rate=16000, vad_events=True, interim_results = True, utterance_end_ms = 1000, endpointing=300)
-            
-            tts_options = SpeakWSOptions(model="aura-2-arcas-en", encoding="linear16", sample_rate=16000,)
-            
             addons = {"no_delay": "true"}
             
             if await self.stt_connection.start(stt_options, addons = addons) is False:
                 print(f"Failed to start STT connection for client {self.client_id}")
                 return False
             else:
-                print(f"STT connection started successfully for client {self.client_id}")
+                print(f"STT connection established for client {self.client_id}")
                 
-            if await self.tts_connection.start(tts_options) is False:
-                print(f"Failed to start TTS connection for client {self.client_id}")
+            try:  
+                self.tts_connection = websockets.connect("wss://api.v8.unrealspeech.com/streamWithTimestamps")
+                print(f"TTS connection established for client {self.client_id}")
+            except Exception as e:
+                print(f"Failed to connect to TTS WebSocket for client {self.client_id}: {e}")
                 return False
-            else:
-                print(f"TTS connection started successfully for client {self.client_id}")
+            
+            self.tts_input = {
+                        'Text' : "",
+                        'VoiceId' : 'Noah',
+                        'Bitrate' : '16k',
+                    }
+            
+            self.tts_headers = {'Authorization': 'Bearer API_KEY'}
             
             return True
             
@@ -231,11 +298,6 @@ class ClientHandler:
                     await self.stt_connection.finish()
                 except:
                     pass 
-            if self.tts_connection:
-                try:
-                    await self.tts_connection.finish()
-                except:
-                    pass
             print(f"Client {self.client_id} handler finished")
  
  
