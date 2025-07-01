@@ -1,3 +1,13 @@
+'''
+This code is different from the app.py in the following ways:
+1. STT, TTS used = Deepgram, TTT used = Gemini 2.5 flash.
+2. Websockets are used here to receive streaming audio data and to stream the TTS audio data to the client.
+'''
+
+
+
+
+
 import data.prompts as prompts
 
 from dotenv import load_dotenv
@@ -5,7 +15,6 @@ import time
 import json
 import uuid
 import os
-import re
 
 import websockets
 import ngrok
