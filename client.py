@@ -1,7 +1,6 @@
 import asyncio
 import websockets 
 import pyaudio
-import time
 
 CHANNEL = 1
 FORMAT = pyaudio.paInt16
@@ -80,8 +79,8 @@ class AudioClient:
                               
     async def main(self):
         try:
-            async with websockets.connect("ws://localhost:8080") as ws:
-                print("websocket connected to ws://localhost:8080")
+            async with websockets.connect("wss://promoted-solid-gannet.ngrok-free.app") as ws:
+                print("websocket connected to wss://promoted-solid-gannet.ngrok-free.app")
                 self.ws = ws
                 self.audio_in_queue = asyncio.Queue(maxsize = 100)
                 self.audio_out_queue = asyncio.Queue(maxsize = 100)

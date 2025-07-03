@@ -1,12 +1,3 @@
-'''
-This code is different from the app_stream.py as TTS with timestamps are implemented here instead of just TTS.
-TTS used - Cartesia - Chosen because it provides timestamps for each word in the audio.
-'''
-
-
-
-
-
 import data.prompts as prompts
 
 from dotenv import load_dotenv
@@ -14,6 +5,7 @@ import time
 import json
 import uuid
 import os
+import re
 
 import websockets
 import ngrok
@@ -42,13 +34,13 @@ load_dotenv()
 class Config:
     user_details = {'name': 'ajay'}
 
-    TTT_MODEL = "gemini-2.5-flash-preview-05-20"
+    TTT_MODEL =  "gemini-2.5-flash-preview-05-20"                                                
     TTT_CONFIG = types.GenerateContentConfig(
-        temperature=1,
+        temperature = 1,
         thinking_config = types.ThinkingConfig(
             thinking_budget=0,
         ),
-        response_mime_type="application/json",
+        response_mime_type =  "text/plain",
     )
     gemini = genai.Client()
 
@@ -57,7 +49,16 @@ class Config:
 config = Config()
 
 
-
+class CartesiaConfig:
+    model_id = "sonic-2"
+    voice = {"id": "f9836c6e-a0bd-460e-9d3c-f7299fa60f94"}
+    output_format = {
+        "container": "raw",
+        "encoding": "pcm_s16le",
+        "sample_rate": 16000
+    }
+    stream = True
+cartesia_config = CartesiaConfig()
 
   
     
@@ -73,9 +74,80 @@ class ClientHandler:
         self.text_in_queue = asyncio.Queue(maxsize = 50)
         self.text_out_queue = asyncio.Queue(maxsize = 50)
         self.is_finals = []
+     
+    
+    async def process_ttt_data(self, t1, response):
+        self.unprocessed_ls = []
+        self.processed_ls = []
+        prev_chunk = ""
+        
+        for chunk in response:
+            chunk = chunk.text
+            
+            if prev_chunk:
+                chunk = prev_chunk + chunk
+                prev_chunk = ""
+            
+            if len(chunk) < 11:
+                prev_chunk = chunk
+                continue
+            
+            print(chunk)
+            
+            if "$Recipe$" in chunk: 
+                task = 'recipe'
+                chunk = chunk[8:]
+            elif "$Unrelated$" in chunk:
+                task = "unrelated"
+                chunk = chunk[11:]
+                
+            if '.'  not in chunk and '\n' not in chunk and '!' not in chunk and '?' not in chunk:
+                splits = [{'task' : task, 'data' : chunk}]
+            else:
+                raw_splits = re.findall(r'.+?(?:\.|\n|\!|\?)', chunk)
+                splits = []
+                for split in raw_splits:
+                    if len(split) > 2:
+                        splits.append({'task' : task, 'data' : split})
+                
+            self.unprocessed_ls.append(chunk)
+            [self.processed_ls.append(split) for split in splits]
+            [await self.text_out_queue.put(split) for split in splits]
+            
+        t2 = time.time()
+        print(f"TTT time taken{t2 - t1:3f}s")
+        print("original TTT chunks:", self.unprocessed_ls, "\n\n")
+        print("final list\n", self.processed_ls, "\n\n")
+    
+    
+    
+    async def on_tts_response(self, response):
+        async for out in response:
+            
+            '''if task == "unrelated":
+                audio_data = {'type' : 'unrelated', 'data' : None}'''
+            #else:
+            audio_data = {'type' : 'unrelated', 'data' : None}
+            #timestamps_data = {'type' : 'recipe_timestamps', 'words' : None, 'start' : None, 'end' : None}
+                
+            if out.audio is not None:
+                data = base64.b64encode(out.audio).decode('utf-8')
+                audio_data['data'] = data
+                audio_data = json.dumps(audio_data)
+                self.audio_out_queue.put_nowait(audio_data)
+                
+            '''if requires_timestamps and out.word_timestamps is not None:
+                timestamps_data['words'] = out.word_timestamps.words
+                timestamps_data['start'] = out.word_timestamps.start
+                timestamps_data['end'] = out.word_timestamps.end
+                timestamps_data = json.dumps(timestamps_data)
+                self.audio_out_queue.put_nowait(timestamps_data)'''
+                
+        
         
     async def receive_stt_text(self, deepgram_self, result, **kwargs):
         sentence = result.channel.alternatives[0].transcript
+        
         if len(sentence) == 0:
             return
         
@@ -121,22 +193,8 @@ class ClientHandler:
             print(f"Client: {self.client_id}\nSTT:\n{utterance}\n\n")
             self.is_finals = []
 
-    async def on_tts_response(self, response):
-        async for out in response:
-            if out.audio is not None:
-                data = base64.b64encode(out.audio).decode('utf-8')
-                data = json.dumps({'type' : 'recipe_audio', 'data' : data})
-                self.audio_out_queue.put_nowait(data)  
 
-            if out.word_timestamps is not None:
-                data = json.dumps({'type' : 'recipe_timestamps', 
-                                  'words' : out.word_timestamps.words, 
-                                  'start' : out.word_timestamps.start, 
-                                  'end' : out.word_timestamps.end})
-                self.audio_out_queue.put_nowait(data)
-            
     
-     
     async def receive_client_audio(self):
         try:
             async for chunk in self.client_ws:
@@ -163,29 +221,32 @@ class ClientHandler:
                 text = await self.text_in_queue.get()
                 if text:           
                     t1 = time.time()
+                    
                     contents = [
                         types.Content(
-                            role="user",
-                            parts=[
-                                types.Part.from_text(text = prompts.instruction.format(user_details = config.user_details, prev_conv = "", curr_conv = text)),
-                            ],),]
-                    response = await asyncio.to_thread(config.gemini.models.generate_content,
+                            role = "user",
+                            parts = [
+                                types.Part.from_text(text = prompts.instruction2.format(user_details = config.user_details, prev_conv = "", curr_conv = text)),
+                            ],
+                            )
+                            ]
+                    
+                    response = await asyncio.to_thread(config.gemini.models.generate_content_stream,
                         model = config.TTT_MODEL,
                         contents = contents,
                         config = config.TTT_CONFIG,
                     )
-                    t2 = time.time()
-                    response = json.loads(response.text)
                     
-                    print(f"Client: {self.client_id}\nTTT:\n{response['response']}\nTIME TAKEN: {t2-t1:3f}s {(t2 - t1)*1000:4f} ms\n\n")
+                    await self.process_ttt_data(t1, response)
+                        
+                    #print(f"Client: {self.client_id}\nTTT:\nTask:\t{response['task']}\nresponse:\n{response['response']}\nTIME TAKEN: {t2-t1:3f}s {(t2 - t1)*1000:4f} ms\n\n")
                     
-                    if response['task'] == "create a food plan":
+                    '''if response['task'] == "create a food plan":
                         if type(response['response']) is not str:
-                            response = response['response']['question']
-                            
-                    response = {'task' : response['task'], 'response' : response['response']}
-                    await self.client_ws.send(response['response'])
-                    await self.text_out_queue.put(response)
+                            response = response['response']['question']'''
+                        
+                    #await self.client_ws.send(response['response'])
+                    #await self.text_out_queue.put(response)
                     
                     
                         
@@ -198,29 +259,24 @@ class ClientHandler:
     async def tts(self):
         try:
             while True:
-                text = await self.text_out_queue.get()
+                ttt_response = await self.text_out_queue.get()
+                text = ttt_response['data']
+                '''requires_timestamps = False
                 
-                if text['task'] == 'create a recipe':
-                    response = await self.tts_connection.send(
-                        model_id = "sonic-2",
-                        transcript = text['response'][:100],
-                        voice = {"id": "f9836c6e-a0bd-460e-9d3c-f7299fa60f94"},
-                        output_format = {
-                            "container": "raw",
-                            "encoding": "pcm_f32le",
-                            "sample_rate": 16000
-                        },
-                        add_timestamps=True,            # Enable word-level timestamps
-                        stream=True
-                    )
-                    await self.on_tts_response(response)
-                    print("Sent text to TTS:")
-                        
-                elif text['task'] == 'unrelated':
-                    for chunk in response:
-                        self.audio_out_queue.put_nowait(chunk)
-                        
-
+                if ttt_response['task'] != "unrelated":
+                    text = text[:300] 
+                    requires_timestamps = True'''
+                    
+                response = await self.tts_connection.send(
+                                model_id = cartesia_config.model_id,
+                                transcript = text,
+                                voice = cartesia_config.voice,
+                                output_format = cartesia_config.output_format,
+                                add_timestamps = False,    
+                                stream = cartesia_config.stream
+                            )
+                await self.on_tts_response(response)
+                print("TTS streaming for unrelated task for client", self.client_id) 
                     
         except Exception as e:
             print(f"TTS ERROR: {e}")
@@ -248,7 +304,7 @@ class ClientHandler:
             self.stt_connection.on(LiveTranscriptionEvents.UtteranceEnd, lambda deepgram_self, utterance_end, **kwargs: self.on_utterance_end(deepgram_self, utterance_end, **kwargs))
 
             stt_options = LiveOptions(model="nova-3", language="en-US", smart_format=True, encoding="linear16", channels=1, 
-                                    sample_rate=16000, vad_events=True, interim_results = True, utterance_end_ms = 1000, endpointing=300)
+                                    sample_rate=16000, vad_events=True, endpointing=1)#interim_results = , utterance_end_ms = 1000, endpointing=300)
             addons = {"no_delay": "true"}
             
             if await self.stt_connection.start(stt_options, addons = addons) is False:
@@ -258,12 +314,14 @@ class ClientHandler:
                 print(f"STT connection established for client {self.client_id}")
                 
             try:  
-                tts_client = AsyncCartesia(api_key=os.getenv("CARTESIA_API_KEY"))
-                self.tts_connection = await tts_client.tts.websocket()
+                self.tts_client = AsyncCartesia(api_key=os.getenv("CARTESIA_API_KEY"))
+                self.tts_connection = await self.tts_client.tts.websocket()
                 print(f"TTS connection established for client {self.client_id}")
+                
             except Exception as e:
                 print(f"Failed to connect to TTS WebSocket for client {self.client_id}: {e}")
                 return False
+            
             return True
             
         except Exception as e:
