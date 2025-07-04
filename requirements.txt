@@ -1,8 +1,6 @@
 azure-cosmos
-fastapi
 python-dotenv
 uvicorn
 websockets
 google-genai
-transformers==4.47.1    # FOR KOKORO tts
-numpy==2.2.1            # FOR KOKORO tts
+gunicorn
