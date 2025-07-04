@@ -2,6 +2,7 @@ import os
 import uuid
 from dotenv import load_dotenv
 from azure.cosmos import CosmosClient, PartitionKey
+import time
 
 load_dotenv()
 
@@ -14,21 +15,46 @@ database = client.get_database_client("Receipe")
 
 container = database.get_container_client("users")
 
-'''item = container.read_item(item='user_details', partition_key='ef6d4915-ef45-4491-b604-fc729413af80')
-print(item)'''
+# Update conversation
+'''t1 = time.time()
+item = container.read_item(item = '20250523T192100Z', partition_key = 'ef6d4915-ef45-4491-b604-fc729413af80')
+item['conversations'].extend(["user: nothiing\n\n"])  
+container.replace_item(item = '20250523T192100Z', body = item)
+item = container.read_item(item = '20250523T192100Z', partition_key = 'ef6d4915-ef45-4491-b604-fc729413af80')
+t2 = time.time()
+print(item)
+print(f"Time taken for fetching previus conversation- {(t2 - t1)*1000:4f} ms")'''
 
-'''item['conversations'].extend(["user : I dont have egg\n"])
-container.replace_item(item='20250523T192100Z', body=item)  # Update the item with new conversation'''
 
-query = "SELECT * FROM c WHERE c.user_id = 'ef6d4915-ef45-4491-b604-fc729413af80'"
+# Get previous conversation
+t1 = time.time()
+query = f"SELECT * FROM c WHERE c.user_id = '001' AND c.id != 'user_details' ORDER BY c.id DESC OFFSET 0 LIMIT 1"
+items = list(container.query_items(
+    query = query
+))
+t2 = time.time()
+print(''.join(items[0]['conversations']))
+print(f"Time taken for fetching previus conversation- {(t2 - t1)*1000:4f} ms")
+
+
+'''item = container.read_item(item='user_details', partition_key='001')
+print(item['details'])'''
+
+
+# Query items
+'''t1 = time.time()
+query = "SELECT * FROM c WHERE c.user_id = '001' AND c.item_id != 'user_details'"
 items = list(container.query_items(
     query=query
 ))
-print(items)  # Returns the last conversation and its id
+t2 = time.time()
+print(t2-t1*1000, "  ms")
+print(items)  # Returns the last conversation and its id'''
 
-
-'''item = container.read_item(item = 'user_details1', partition_key = 'c09b219b-16b6-46f4-a34e-e73b2b8ada62')
+# Read an item
+'''item = container.read_item(item = 'user_details', partition_key = '001')
 print(item['details'])'''
+
 
 
 '''update_item = {
@@ -49,13 +75,13 @@ print(item['details'])
 item = container.replace_item(item = 'user_details', body = item)'''
 
 
-'''user_ids = ["ef6d4915-ef45-4491-b604-fc729413af80", "c09b219b-16b6-46f4-a34e-e73b2b8ada62"] 
+'''user_ids =      ["001"]            #["ef6d4915-ef45-4491-b604-fc729413af80", "c09b219b-16b6-46f4-a34e-e73b2b8ada62"] 
 items = [
     {
         "id": "user_details",
-        "user_id": user_ids[1],
+        "user_id": user_ids[0],
         "details" : {
-            "name": "Chandru",
+            "name": "superman",
             "gender": "female",
             "age": 22,
             "weight": "40Kgs",
@@ -69,9 +95,10 @@ items = [
     }   
 ]
 for item in items:
-    container.create_item(body = item)
-    
-items = [
+    container.create_item(body = item)'''
+   
+
+'''items = [
     {
         "id" : "20250523T181100Z",     # timestamp
         "user_id" : user_ids[0],

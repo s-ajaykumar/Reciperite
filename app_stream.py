@@ -18,24 +18,105 @@ import time
 import json
 import uuid
 import os
+from datetime import datetime
 
 import websockets
 import ngrok
 import asyncio
 import base64
 
-from google.genai import types
-
-from deepgram import (LiveTranscriptionEvents, DeepgramClient)
+from azure.cosmos import CosmosClient
 
 from google import genai
-
+from google.genai import types
 from cartesia import AsyncCartesia
+from deepgram import (LiveTranscriptionEvents, DeepgramClient)
 
 load_dotenv()
 
 
 
+
+
+class DB:
+    def __init__(self):
+        client = CosmosClient.from_connection_string(os.environ["DB_CONNECTION_STRING"])
+        database = client.get_database_client("Receipe")
+        self.container = database.get_container_client("users")
+        self.item_id = "user_details"
+        
+    
+    async def get_user_details(self, user_id):
+        t1 = time.time()
+        print(user_id)
+        try:
+            item = self.container.read_item(item = self.item_id, partition_key = user_id)
+            
+        except Exception as e:
+            print("error in getting details ", e)
+        t2 = time.time()
+        print("DB time taken for retrieving user details:", (t2 - t1)*1000, "  ms")
+        return item['details']  
+    
+    async def get_prev_conversation(self, user_id):
+        t1 = time.time()
+        query = f"SELECT * FROM c WHERE c.user_id = '{user_id}' AND c.id != '{self.item_id}' ORDER BY c.id DESC OFFSET 0 LIMIT 1"
+        items = list(self.container.query_items(
+            query = query
+        ))
+        t2 = time.time()
+        print(f"Time taken for fetching previus conversation- {(t2 - t1)*1000:4f} ms")
+        
+        if not items:
+            return "", ""
+        else:
+            prev_conv_id = items[0]['id']  
+            return prev_conv_id, ''.join(items[0]['conversations'])   # Returns a string of the previous conversation
+        
+    async def update_user_details(self, update_details):
+        await ws.send_log(f"Updating user details")
+        
+        item = self.container.read_item(item = self.item_id, partition_key = config.user_id)  
+        for key, value in update_details.items():
+            item['details'][key] = value
+        self.container.replace_item(item=self.item_id, body = item)
+        
+        item = self.container.read_item(item = self.item_id, partition_key = config.user_id) 
+        await ws.send_log(f"Updated user details: \n{item['details']}")
+        
+    async def create_new_conversation(self, user_id, user_input, ai_response):
+        t1 = time.time()
+        print(f"Creating a new conversation")
+        
+        item = {
+            "id": datetime.now().strftime('%Y%m%dT%H%M%SZ'),  # Unique ID based on current timestamp
+            "user_id": user_id,
+            "conversations": [user_input, ai_response]
+        }
+        self.container.create_item(body = item)
+        
+        t2 = time.time()
+        print(f"Time taken for uploading latest conversation to DB: ", (t2-t1)*1000, " ms\n\n")
+        return item["id"]
+        
+    async def update_conversation(self, prev_conv_id, user_id, user_input, ai_response, is_context_continued):
+        if is_context_continued != "True" or prev_conv_id == "":
+            print(f"Previous conversations is not related to current conversation.\n\n")
+            conv_id = await self.create_new_conversation(user_id, user_input, ai_response)
+            return 'new', conv_id
+            
+        else:
+            t1 = time.time()
+            print(f"Current conversation is related to previous conversation.\n\n")
+            item = self.container.read_item(item = prev_conv_id, partition_key = user_id)
+            item['conversations'].extend([user_input, ai_response])  
+            self.container.replace_item(item = prev_conv_id, body = item)
+            t2 = time.time()
+            print("Time taken for Updating conversation in DB: ", (t2-t1)*1000, " ms\n\n")
+            return 'continue', ""
+
+    
+    
     
 class ClientHandler:
     def __init__(self, client_id, ws):
@@ -47,6 +128,7 @@ class ClientHandler:
         self.gemini = None
         
         self.prev_conv = None
+        self.prev_conv_id = None
         self.user_details = None
         
         self.audio_in_queue = asyncio.Queue(maxsize = 100)
@@ -62,26 +144,23 @@ class ClientHandler:
             types.Content(
                 role = "user",
                 parts = [
-                    types.Part.from_text(text = prompts.instruction.format(prev_conv = "", curr_conv = text)),
+                    types.Part.from_text(text = "Previous conversations:\n"+self.prev_conv+"\n\n"+"Current query:\n"+text),
                 ],
             )
         ]
         return contents
     
-    
-    async def format_TTT_input(self, text):
-        CONFIG = types.GenerateContentConfig(
+    async def get_ttt_config(self):
+        config = types.GenerateContentConfig(
             temperature = 1,
-            system_instruction = prompts.instruction.format(user_details = self.user_details),
-            contents = await self.format_contents(text),
+            system_instruction = prompts.instruction.format(user_details = str(self.user_details)),
             thinking_config = types.ThinkingConfig(
                 thinking_budget = 0,
             ),
             response_mime_type = "application/json",
         )
+        return config
     
-    
-           
     async def on_new_speech(self):
         await self.client_ws.send(json.dumps({'type' : 'control_msg', 'data' : 'stop'}))
                 
@@ -171,7 +250,7 @@ class ClientHandler:
                 response = await asyncio.to_thread(self.gemini.models.generate_content,
                     model = config.TTT.MODEL,
                     contents = contents,
-                    config = config.TTT.CONFIG,
+                    config = await self.get_ttt_config(),
                 )
                 
                 t2 = time.time()
@@ -184,8 +263,22 @@ class ClientHandler:
                     
                 await self.client_ws.send(response['response'])
                 await self.text_out_queue.put(response)
+                
+                if response['task'] != "unrelated":
+                    conv, conv_id = await db.update_conversation(prev_conv_id = self.prev_conv_id,
+                                                                                user_id = self.client_id, 
+                                                                                user_input = text, 
+                                                                                ai_response = response['response'], 
+                                                                                is_context_continued = response['is_context_continued'])
+                
+                    curr_conv = "User: "+text+"\n\n"+"AI: "+response['response']+"\n\n"
                     
-                    
+                    if conv == 'new':
+                        self.prev_conv_id = conv_id
+                        self.prev_conv = curr_conv
+                        
+                    else:
+                        self.prev_conv += curr_conv
                         
         except websockets.exceptions.ConnectionClosedOK:
             print("TTT WebSocket connection closed gracefully.")
@@ -265,7 +358,20 @@ class ClientHandler:
         except Exception as e:
             print(f"Failed to connect to TTS WebSocket for client {self.client_id}: {e}")
             return False
+        
+        
+        try:
+            self.user_details = await db.get_user_details(self.client_id)
+            self.prev_conv_id, self.prev_conv = await db.get_prev_conversation(self.client_id)
             
+            if not self.prev_conv:  
+                print("New User\n\n")
+                
+            
+        except Exception as e:
+            print("Error in retrieving user details/previous conversation from the db")
+            return False
+        
         return True
     
         
@@ -313,7 +419,7 @@ class Server:
         self.tunnel = None
      
     async def handle_new_client(self, ws):
-        client_id = str(uuid.uuid4())
+        client_id = "001"                           #str(uuid.uuid4())
         print(f"New client connected: {client_id}")
         try:
             await ws.accept() if hasattr(ws, 'accept') else None
@@ -370,7 +476,12 @@ class Server:
             await self.stop_tunnel()
          
     
+    
+    
+
 if __name__ == "__main__": 
+     db = DB()
+     print("Database connected\n")
      server = Server()
      asyncio.run(server.main())   
         

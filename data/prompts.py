@@ -6,10 +6,10 @@ Do the below tasks.
 
 TASKS
 # TASK_1 : 
-1. Read through the conversations provided above.
-2. If the "previous_conversation" is present in the above conversations, read through the current conversation and the previous conversation provided above, decide whether the conversations are related.
-3. Based on the decision, decide whether to use only the current conversation or both the current and previous conversations to perform the following tasks, based on the decision, return 'True' or 'False' as string in the 'is_context_continued' field in the response_template and based on the decision, return 
-4. If "previous_conversation" is not present in the above conversations, just continue to the following TASK_2.
+1. Read through the conversations provided below.
+2. If the "previous_conversation" is not empty in the below conversations, read through the current query and the previous conversation provided below, decide whether the both are related.
+3. Based on the decision, decide whether to use only the current conversation or both the current query and the previous conversations to perform the following tasks and based on the decision, return 'True' or 'False' as string in the 'is_context_continued' field in the response_template.
+4. If "previous_conversation" is empty in the below conversations, provide "False" as a string in the 'is_context_continued' field and just continue to the following TASK_2.
 
 
 # TASK_2:
@@ -78,8 +78,7 @@ Instructions:
 # TASK_4:
 Format your response by following the below instructions.
 Instructions:
-  1. The "is_context_continued" field in the response_template should be set to "True"
-  if the current conversation is continuing the previous conversation, otherwise it should be set to "False".
+  1. The "is_context_continued" field in the response_template should be set to "True" if the current query is continuing the previous conversation, otherwise it should be set to "False".
   2. If there are numbers present in your response, replace them with their word form.
   3. The response should not contain more than 1800 characters.
   4. Your response tone should be natural, expressive.
@@ -97,7 +96,6 @@ Instructions:
   16. Use active voice for clarity and engagement
   17. Don't use '\n' instead use '.'
   18. If any needs to be highlighted, use double quotes like "Barbecue Chicken Pizza" 
-
 
 Perform the above TASKS one by one by following the appropriate task's instructions and return the final json response.
 """
