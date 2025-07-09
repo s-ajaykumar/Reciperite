@@ -264,9 +264,16 @@ class ClientHandler:
                         response = response['data']['question']
                         
                 if response['task'] == "repeat_recipe":
-                    self.prev_conv.find("AI:")
+                    specific_part = response['data']['specific_part']
+                    full_recipe = response['data']['full_recipe']
+                    start_idx = full_recipe.find(specific_part)
+                    end_idx = start_idx + len(specific_part)
                     
-                await self.client_ws.send(json.dumps({'type' : 'ai_text_response', 'data' : response['data']}))
+                    await self.client_ws.send(json.dumps({'type' : 'repeat_recipe', 'data' : {'start_idx' : start_idx, 'end_idx' : end_idx}}))
+                    
+                if response['task'] != "repeat_recipe":
+                    await self.client_ws.send(json.dumps({'type' : 'ai_text_response', 'data' : response['data']}))
+                    
                 await self.text_out_queue.put(response)
                 
                 if response['task'] != "unrelated":
@@ -276,7 +283,7 @@ class ClientHandler:
                                                                                 ai_response = "AI: " + str(response['data']) + "\n\n\n", 
                                                                                 is_context_continued = response['is_context_continued'])
 
-                    curr_conv = "User: "+text+"\n\n"+"AI: "+response['data']+"\n\n"
+                    curr_conv = "User: "+text+"\n\n"+"AI: "+str(response['data'])+"\n\n"
                     
                     if conv == 'new':
                         self.prev_conv_id = conv_id
