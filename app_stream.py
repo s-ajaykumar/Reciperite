@@ -3,6 +3,7 @@ This code is different from the app.py in the following ways:
 1. STT used =     Deepgram,       TTT used =          Gemini 2.5 flash,             TTS used -         Cartesia 
 2. Websockets are used here to receive streaming audio data and to stream the TTS audio data to the client.
 3. TTS with timestamps are implemented here instead of just TTS.
+4. Implemented database for context retrieval
 '''
 
 
@@ -153,7 +154,7 @@ class ClientHandler:
     async def get_ttt_config(self):
         config = types.GenerateContentConfig(
             temperature = 1,
-            system_instruction = prompts.instruction.format(user_details = str(self.user_details)),
+            system_instruction = [types.Part.from_text(text = prompts.instruction.format(user_details = str(self.user_details)))],
             thinking_config = types.ThinkingConfig(
                 thinking_budget = 0,
             ),
@@ -247,31 +248,35 @@ class ClientHandler:
                 t1 = time.time()
                 
                 contents = await self.format_contents(text)
+                ttt_config = await self.get_ttt_config()
                 response = await asyncio.to_thread(self.gemini.models.generate_content,
                     model = config.TTT.MODEL,
                     contents = contents,
-                    config = await self.get_ttt_config(),
+                    config = ttt_config,
                 )
                 
                 t2 = time.time()
                 response = json.loads(response.text)
-                print(f"Client: {self.client_id}\nTTT:\nTask:\t{response['task']}\nresponse:\n{response['response']}\nTIME TAKEN: {t2-t1:3f}s {(t2 - t1)*1000:4f} ms\n\n")
+                print(f"Client: {self.client_id}\nTTT:\nTask:\t{response['task']}\nresponse:\n{response['data']}\nTIME TAKEN: {t2-t1:3f}s {(t2 - t1)*1000:4f} ms\n\n")
                 
-                if response['task'] == "create a food plan":
-                    if type(response['response']) is not str:
-                        response = response['response']['question']
+                if response['task'] == "create_food_plan":
+                    if type(response['data']) is not str:
+                        response = response['data']['question']
+                        
+                if response['task'] == "repeat_recipe":
+                    self.prev_conv.find("AI:")
                     
-                await self.client_ws.send(response['response'])
+                await self.client_ws.send(json.dumps({'type' : 'ai_text_response', 'data' : response['data']}))
                 await self.text_out_queue.put(response)
                 
                 if response['task'] != "unrelated":
                     conv, conv_id = await db.update_conversation(prev_conv_id = self.prev_conv_id,
                                                                                 user_id = self.client_id, 
-                                                                                user_input = text, 
-                                                                                ai_response = response['response'], 
+                                                                                user_input = "User: " + text + "\n\n", 
+                                                                                ai_response = "AI: " + str(response['data']) + "\n\n\n", 
                                                                                 is_context_continued = response['is_context_continued'])
-                
-                    curr_conv = "User: "+text+"\n\n"+"AI: "+response['response']+"\n\n"
+
+                    curr_conv = "User: "+text+"\n\n"+"AI: "+response['data']+"\n\n"
                     
                     if conv == 'new':
                         self.prev_conv_id = conv_id
@@ -297,10 +302,14 @@ class ClientHandler:
                     text = text[:300] 
                     requires_timestamps = True
                     
+                voice = config.TTS.voice.copy()
+                voice["__experimental_controls"] = {
+                                "speed": "slowest"              # or "slowest", or a float like -0.5
+                            }
                 response = await self.tts_connection.send(
                                 model_id = config.TTS.model_id,
                                 transcript = text,
-                                voice = config.TTS.voice,
+                                voice = voice,
                                 output_format = config.TTS.output_format,
                                 add_timestamps = requires_timestamps,    
                                 stream = config.TTS.stream
@@ -317,7 +326,6 @@ class ClientHandler:
             while True:
                 audio_data = await self.audio_out_queue.get()
                 await self.client_ws.send(audio_data)
-                print("sent data to client")
                 
         except websockets.exceptions.ConnectionClosed:
             print(f"Client {self.client_id} connection closed while sending audio")

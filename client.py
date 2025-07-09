@@ -1,6 +1,8 @@
 import asyncio
 import websockets 
 import pyaudio
+import json
+import base64
 
 CHANNEL = 1
 FORMAT = pyaudio.paInt16
@@ -19,11 +21,18 @@ class AudioClient:
     async def receive_audio(self):
         while True:
             data = await self.ws.recv()
-            '''if data == 'Speech interrupted':
+            data = json.loads(data)
+            
+            if data['type'] == "control_msg":
                 while not self.audio_in_queue.empty():
                     self.audio_in_queue.get_nowait()
-            else:'''
-            self.audio_in_queue.put_nowait(data)
+                    
+            elif data['type'] == "recipe_audio" or data['type'] == "unrelated":
+                audio_bytes = base64.b64decode(data['data'])
+                self.audio_in_queue.put_nowait(audio_bytes)
+                
+            elif data['type'] == 'ai_text_response':
+                print("AI text response:\n", data['data'], "\n\n")
     
     async def play_audio(self):
         speaker = await asyncio.to_thread(pya.open,

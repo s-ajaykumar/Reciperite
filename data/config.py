@@ -23,7 +23,7 @@ class STT_CONFIG:
     
 @dataclass
 class TTT_CONFIG:
-    MODEL =  "gemini-2.5-flash-preview-05-20"  
+    MODEL =  "gemini-2.5-flash"  
     
     
     

@@ -34,6 +34,7 @@ items = list(container.query_items(
 ))
 t2 = time.time()
 print(''.join(items[0]['conversations']))
+print(items)
 print(f"Time taken for fetching previus conversation- {(t2 - t1)*1000:4f} ms")
 
 
