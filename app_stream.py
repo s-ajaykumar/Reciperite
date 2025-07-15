@@ -4,6 +4,7 @@ This code is different from the app.py in the following ways:
 2. Websockets are used here to receive streaming audio data and to stream the TTS audio data to the client.
 3. TTS with timestamps are implemented here instead of just TTS.
 4. Implemented database for context retrieval
+5. Implemented highlighting of recipe text. But going to modify it.
 '''
 
 
@@ -139,13 +140,43 @@ class ClientHandler:
         self.is_finals = []
      
      
-     
+    async def save_conversation_in_db(self, text, response):
+        print(response)
+        if response['task'] != "unrelated":
+            conv, conv_id = await db.update_conversation(prev_conv_id = self.prev_conv_id,
+                                                        user_id = self.client_id, 
+                                                        user_input = "User: " + text + "\n", 
+                                                        ai_response = "AI: " + str(response['data']) + "\n\n", 
+                                                        is_context_continued = response['is_context_continued'])
+            curr_conv = "User: "+text+"\n"+"AI: "+str(response['data'])+"\n\n"
+            
+            if conv == 'new':
+                self.prev_conv_id = conv_id
+                self.prev_conv = curr_conv
+            else:
+                self.prev_conv += curr_conv
+        
+    async def format_TTT_response(self, response):
+        if response['task'] == "create_food_plan":
+                    if type(response['data']) is not str:
+                        response = response['data']['question']
+                        
+        elif response['task'] == "repeat_recipe":
+            specific_part = response['data']['specific_part']
+            full_recipe = response['data']['full_recipe']
+            start_idx = full_recipe.find(specific_part)
+            end_idx = start_idx + len(specific_part)
+            await self.client_ws.send(json.dumps({'type' : 'repeat_recipe', 'data' : {'start_idx' : start_idx, 'end_idx' : end_idx}}))
+            
+        elif response['task'] == "create_recipe":
+            await self.client_ws.send(json.dumps({'type' : 'ai_text_response', 'data' : response['data']}))
+        
     async def format_contents(self, text):
         contents = [
             types.Content(
                 role = "user",
                 parts = [
-                    types.Part.from_text(text = "Previous conversations:\n"+self.prev_conv+"\n\n"+"Current query:\n"+text),
+                    types.Part.from_text(text = "Previous conversations:\n"+self.prev_conv+"\n\n"+"Current query:\n"+text)
                 ],
             )
         ]
@@ -218,7 +249,6 @@ class ClientHandler:
                 self.is_finals = []
 
 
-    
     async def receive_client_audio(self):
         try:
             async for chunk in self.client_ws:
@@ -245,52 +275,24 @@ class ClientHandler:
         try:
             while True:
                 text = await self.text_in_queue.get()
-                t1 = time.time()
-                
+               
                 contents = await self.format_contents(text)
                 ttt_config = await self.get_ttt_config()
+                
+                t1 = time.time()
                 response = await asyncio.to_thread(self.gemini.models.generate_content,
                     model = config.TTT.MODEL,
                     contents = contents,
                     config = ttt_config,
                 )
-                
                 t2 = time.time()
                 response = json.loads(response.text)
-                print(f"Client: {self.client_id}\nTTT:\nTask:\t{response['task']}\nresponse:\n{response['data']}\nTIME TAKEN: {t2-t1:3f}s {(t2 - t1)*1000:4f} ms\n\n")
+                print(f"\t\t\t\tClient: {self.client_id}\nUser: {text}\nAI:\nTask:\t{response['task']}\n{response['data']}\n\nTIME TAKEN: {t2-t1:3f}s {(t2 - t1)*1000:4f} ms\n\n")
                 
-                if response['task'] == "create_food_plan":
-                    if type(response['data']) is not str:
-                        response = response['data']['question']
-                        
-                if response['task'] == "repeat_recipe":
-                    specific_part = response['data']['specific_part']
-                    full_recipe = response['data']['full_recipe']
-                    start_idx = full_recipe.find(specific_part)
-                    end_idx = start_idx + len(specific_part)
-                    
-                    await self.client_ws.send(json.dumps({'type' : 'repeat_recipe', 'data' : {'start_idx' : start_idx, 'end_idx' : end_idx}}))
-                    
-                if response['task'] != "repeat_recipe":
-                    await self.client_ws.send(json.dumps({'type' : 'ai_text_response', 'data' : response['data']}))
-                    
+                await self.format_TTT_response(response)   
                 await self.text_out_queue.put(response)
+                await self.save_conversation_in_db(text, response)
                 
-                if response['task'] != "unrelated":
-                    conv, conv_id = await db.update_conversation(prev_conv_id = self.prev_conv_id,
-                                                                                user_id = self.client_id, 
-                                                                                user_input = "User: " + text + "\n\n", 
-                                                                                ai_response = "AI: " + str(response['data']) + "\n\n\n", 
-                                                                                is_context_continued = response['is_context_continued'])
-
-                    curr_conv = "User: "+text+"\n\n"+"AI: "+str(response['data'])+"\n\n"
-                    
-                    if conv == 'new':
-                        self.prev_conv_id = conv_id
-                        self.prev_conv = curr_conv
-                        
-                    else:
-                        self.prev_conv += curr_conv
                         
         except websockets.exceptions.ConnectionClosedOK:
             print("TTT WebSocket connection closed gracefully.")
@@ -302,12 +304,22 @@ class ClientHandler:
         try:
             while True:
                 ttt_response = await self.text_out_queue.get()
-                text = ttt_response['response']
-                requires_timestamps = False
                 
                 if ttt_response['task'] != "unrelated":
-                    text = text[:300] 
-                    requires_timestamps = True
+                    if ttt_response['task'] == 'create_recipe':
+                        text = ttt_response['data']
+                        text = text[:300] 
+                        requires_timestamps = True
+                        
+                    elif ttt_response['task'] == 'repeat_recipe':
+                        text = ttt_response['data']['specific_part']
+                        requires_timestamps = True
+                        
+                    elif ttt_response['task'] == 'create_food_plan':
+                        pass
+                else:
+                    text = ttt_response['data']
+                    requires_timestamps = False
                     
                 voice = config.TTS.voice.copy()
                 voice["__experimental_controls"] = {
@@ -340,8 +352,6 @@ class ClientHandler:
         except Exception as e:
             print(f"Error sending audio to client {self.client_id}: {e}")
             
-        
-        
         
     async def setup_connections(self):
         try:
@@ -389,7 +399,6 @@ class ClientHandler:
         
         return True
     
-        
     async def handle_client(self):
         try:
             if not await self.setup_connections():
@@ -496,7 +505,7 @@ class Server:
 
 if __name__ == "__main__": 
      db = DB()
-     print("Database connected\n")
+     print("Connected to database\n")
      server = Server()
      asyncio.run(server.main())   
         
