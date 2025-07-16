@@ -4,7 +4,7 @@ This code is different from the app.py in the following ways:
 2. Websockets are used here to receive streaming audio data and to stream the TTS audio data to the client.
 3. TTS with timestamps are implemented here instead of just TTS.
 4. Implemented database for context retrieval
-5. Implemented highlighting word by word
+5. Implemented highlighting line by line (or) specific part.
 '''
 
 
@@ -160,15 +160,24 @@ class ClientHandler:
                     if type(response['data']) is not str:
                         response = response['data']['question']
                         
-        elif response['task'] == "repeat_recipe":
-            specific_part = response['data']['specific_part']
-            full_recipe = response['data']['full_recipe']
-            start_idx = full_recipe.find(specific_part)
-            end_idx = start_idx + len(specific_part)
-            await self.client_ws.send(json.dumps({'type' : 'repeat_recipe', 'data' : {'start_idx' : start_idx, 'end_idx' : end_idx}}))
-            
         elif response['task'] == "create_recipe":
-            await self.client_ws.send(json.dumps({'type' : 'ai_text_response', 'data' : response['data']}))
+            await self.client_ws.send(json.dumps(response))
+            tts_input = response['data']['question']
+            return tts_input
+                     
+        elif response['task'] == "guiding_in_ingredients":
+            await self.client_ws.send(json.dumps({"task" : response['task'], "index" : response['data']['index']}))
+            tts_input = response['data']['ingredients']
+            return tts_input
+        
+        elif response['task'] == "guiding_in_instructions":
+            await self.client_ws.send(json.dumps({"task" : response['task'], "index" : response['data']['index']}))
+            tts_input = response['data']['instruction']
+            return tts_input
+        
+        elif response['task'] == "unrelated":
+            tts_input = response['data']
+            return tts_input
         
     async def format_contents(self, text):
         contents = [
@@ -204,28 +213,11 @@ class ClientHandler:
             
         print("\tyes cleared")
                     
-    async def on_tts_response(self, response, task, requires_timestamps):
-        async for out in response:
-            
-            if task == "unrelated":
-                audio_data = {'type' : 'unrelated', 'data' : None}
-            else:
-                audio_data = {'type' : 'recipe_audio', 'data' : None}
-                timestamps_data = {'type' : 'recipe_timestamps', 'words' : None, 'start' : None, 'end' : None}
-                
-            if out.audio is not None:
-                data = base64.b64encode(out.audio).decode('utf-8')
-                audio_data['data'] = data
-                audio_data = json.dumps(audio_data)
-                self.audio_out_queue.put_nowait(audio_data)
-                
-            if requires_timestamps and out.word_timestamps is not None:
-                timestamps_data['words'] = out.word_timestamps.words
-                timestamps_data['start'] = out.word_timestamps.start
-                timestamps_data['end'] = out.word_timestamps.end
-                print(timestamps_data)
-                timestamps_data = json.dumps(timestamps_data)
-                self.audio_out_queue.put_nowait(timestamps_data)
+    async def on_tts_response(self, tts_response):
+        async for out in tts_response:
+            audio_data = base64.b64encode(out.audio).decode('utf-8')
+            audio_data = {"task" : "audio", "data" : audio_data}
+            self.audio_out_queue.put_nowait(audio_data)
         
     async def on_stt_response(self, deepgram_self, result, **kwargs):
         sentence = result.channel.alternatives[0].transcript
@@ -239,13 +231,14 @@ class ClientHandler:
             if result.speech_final:
                 utterance = " ".join(self.is_finals)
                 
-                print("New Speech started\n\n")
-                print("Clearing queues...", end = '')
-                await self.on_new_speech()
+                print(f"\t\tClient {self.client_id}")
+                print("New Speech started")
                 
-                    
+                await self.on_new_speech()
+                print("Clearing existing queues...\n\n", end = '')
+                
                 await self.text_in_queue.put(utterance)
-                print(f"Client {self.client_id}\nSTT:\n{utterance}\n\n")
+                print(f"STT: {utterance}\n")
                 self.is_finals = []
 
 
@@ -289,8 +282,8 @@ class ClientHandler:
                 response = json.loads(response.text)
                 print(f"\t\t\t\tClient: {self.client_id}\nUser: {text}\nAI:\nTask:\t{response['task']}\n{response['data']}\n\nTIME TAKEN: {t2-t1:3f}s {(t2 - t1)*1000:4f} ms\n\n")
                 
-                await self.format_TTT_response(response)   
-                await self.text_out_queue.put(response)
+                tts_input = await self.format_TTT_response(response)   
+                await self.text_out_queue.put(tts_input)
                 await self.save_conversation_in_db(text, response)
                 
                         
@@ -303,39 +296,21 @@ class ClientHandler:
     async def tts(self):
         try:
             while True:
-                ttt_response = await self.text_out_queue.get()
-                
-                if ttt_response['task'] != "unrelated":
-                    if ttt_response['task'] == 'create_recipe':
-                        text = ttt_response['data']
-                        text = text[:300] 
-                        requires_timestamps = True
-                        
-                    elif ttt_response['task'] == 'repeat_recipe':
-                        text = ttt_response['data']['specific_part']
-                        requires_timestamps = True
-                        
-                    elif ttt_response['task'] == 'create_food_plan':
-                        pass
-                else:
-                    text = ttt_response['data']
-                    requires_timestamps = False
+                tts_input = await self.text_out_queue.get()
                     
                 voice = config.TTS.voice.copy()
                 voice["__experimental_controls"] = {
                                 "speed": "slowest"              # or "slowest", or a float like -0.5
                             }
-                response = await self.tts_connection.send(
+                tts_response = await self.tts_connection.send(
                                 model_id = config.TTS.model_id,
-                                transcript = text,
+                                transcript = tts_input,
                                 voice = voice,
                                 output_format = config.TTS.output_format,
-                                add_timestamps = requires_timestamps,    
+                                add_timestamps = False,    
                                 stream = config.TTS.stream
                             )
-                
-                await self.on_tts_response(response, ttt_response['task'], requires_timestamps)
-                print("TTS streaming for client", self.client_id) 
+                await self.on_tts_response(tts_response)
                     
         except Exception as e:
             print(f"TTS ERROR: {e}")

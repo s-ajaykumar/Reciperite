@@ -38,7 +38,7 @@ Instructions:
     3. Provide them in the following response template:
     response_template:
         {{ "task" : "create_recipe", 
-           "data" : "recipe description, ingredients and the instructions to make it",    # String
+           "data" : "recipe description, ingredients: 1. ingredient1 2. ingredient2... and the instructions: 1. instruction1 2. instruction2... to make it",    # String
            "is_context_continued" : "True/False"  # String
         }}
 
@@ -89,7 +89,7 @@ return the specific part and the entire recipe in the following json format.
 }}
 For example:
   Example 1:
-    Previous Conversation : "User: tell me a chocolate recipe.\n\nAI: Here's a simple and delicious chocolate recipe for you - \"Microwave Chocolate Mug Cake.\". It's perfect for a quick sweet treat. You'll need these ingredients: four tablespoons all-purpose flour, four tablespoons granulated sugar, two tablespoons unsweetened cocoa powder, one-fourth teaspoon baking powder, one-fourth teaspoon salt, four tablespoons milk, two tablespoons vegetable oil, and one-fourth teaspoon vanilla extract. To make it, follow these instructions: 1. In a large microwave-safe mug, whisk together the flour, sugar, cocoa powder, baking powder, and salt. 2. Stir in the milk, vegetable oil, and vanilla extract until smooth and well combined. 3. Microwave on high for one minute to one minute and thirty seconds, or until set."
+    Previous Conversation : "User: tell me a chocolate recipe.\n\nAI: Here's a simple and delicious chocolate recipe for you - \"Microwave Chocolate Mug Cake.\". It's perfect for a quick sweet treat. You'll need these ingredients: 1. four tablespoons all-purpose flour, 2.four tablespoons granulated sugar, 3.two tablespoons unsweetened cocoa powder, 4.one-fourth teaspoon baking powder, 5.one-fourth teaspoon salt, 6. four tablespoons milk, 7. two tablespoons vegetable oil, and 8. one-fourth teaspoon vanilla extract. To make it, follow these instructions: 1. In a large microwave-safe mug, whisk together the flour, sugar, cocoa powder, baking powder, and salt. 2. Stir in the milk, vegetable oil, and vanilla extract until smooth and well combined. 3. Microwave on high for one minute to one minute and thirty seconds, or until set."
     current query : "Repeat the step2"
     Your output:
       {{
@@ -102,7 +102,7 @@ For example:
       }}
       
   Example 2:
-    Previous Conversation : "User: tell me a chocolate recipe.\n\nAI: Here's a simple and delicious chocolate recipe for you - \"Microwave Chocolate Mug Cake.\". It's perfect for a quick sweet treat. You'll need these ingredients: four tablespoons all-purpose flour, four tablespoons granulated sugar, two tablespoons unsweetened cocoa powder, one-fourth teaspoon baking powder, one-fourth teaspoon salt, four tablespoons milk, two tablespoons vegetable oil, and one-fourth teaspoon vanilla extract. To make it, follow these instructions: 1. In a large microwave-safe mug, whisk together the flour, sugar, cocoa powder, baking powder, and salt. 2. Stir in the milk, vegetable oil, and vanilla extract until smooth and well combined. 3. Microwave on high for one minute to one minute and thirty seconds, or until set.\n\n\nUser:Repeat the step2\n\nAI: 2. Stir in the milk, vegetable oil, and vanilla extract until smooth and well combined.\n\n\n"
+    Previous Conversation : "User: tell me a chocolate recipe.\n\nAI: Here's a simple and delicious chocolate recipe for you - \"Microwave Chocolate Mug Cake.\". It's perfect for a quick sweet treat. You'll need these ingredients: 1. four tablespoons all-purpose flour, 2.four tablespoons granulated sugar, 3.two tablespoons unsweetened cocoa powder, 4.one-fourth teaspoon baking powder, 5.one-fourth teaspoon salt, 6. four tablespoons milk, 7. two tablespoons vegetable oil, and 8. one-fourth teaspoon vanilla extract. To make it, follow these instructions: 1. In a large microwave-safe mug, whisk together the flour, sugar, cocoa powder, baking powder, and salt. 2. Stir in the milk, vegetable oil, and vanilla extract until smooth and well combined. 3. Microwave on high for one minute to one minute and thirty seconds, or until set.\n\n\nUser:Repeat the step2\n\nAI: 2. Stir in the milk, vegetable oil, and vanilla extract until smooth and well combined.\n\n\n"
     current query : "Continue"
     Your output:
       {{
@@ -120,7 +120,7 @@ For example:
 Your response should follow the below guidelines[Skip these guidelines for TASK 4]:
 Instructions:
   1. The "is_context_continued" field in the response_template should be set to "True" if the current query is continuing the previous conversation, otherwise it should be set to "False".
-  2. If there are numbers present in your response, replace them with their word form.
+  2. If there are numbers present in your response, let them be as it is.
   3. The response should not contain more than 1800 characters.
   4. Your response tone should be natural, expressive.
   5. End sentences with periods like "Hello. One moment. I’m looking up your records." 
@@ -138,6 +138,7 @@ Instructions:
   17. Don't use '\n' instead use '.'
   18. If any needs to be highlighted, use double quotes like "Barbecue Chicken Pizza" 
   19. Don't use asterisks in response.
+  20. The ingredients should be numbered like "1. ingredient_1\n2. ingredient_2..."
 
 Perform the above TASKS one by one by following the appropriate task's instructions and return the final json response.
 """
@@ -338,8 +339,7 @@ If "previous_conversations" and the current query is not related then set 'is_co
 1. If the query is not related to food (or) health then just respond with the following response and skip all of the below tasks.
 response:
     {{"task" : "unrelated",
-     "data" : "Sorry! I can't help with that.",
-     "is_context_continued" : "False"
+     "data" : "Sorry! I can't help with that."
     }}
 2. If the retained conversations is about food recipe or food planning, then continue to TASK_3.
 
@@ -355,12 +355,15 @@ Instructions:
     3. Provide them in the following response template:
     response_template:
         {{ "task" : "create_recipe", 
-           "data" : {
+           "data" : {{
               "title" : "recipe_title",
-              "ingredients" : "1. ingredient1\n2.ingredient2...",
-              "instructions" : "1. instruction1\n2. instruction2..."
+              "ingredients" : ["1. ingredient1", "2.ingredient2", ...],
+              "instructions" : ["1. instruction1", "2. instruction2", ...],
+              "question" : "",
               "is_context_continued" : "True/False"  # String
+              }}
         }}
+    Ask the user that the recipe is ready and shall you start to guide the user to make the recipe in the "question" field.
     Value of "is_context_continued" field is based on your decision in "TASK_1".
 
 
@@ -399,88 +402,253 @@ Instructions:
             }}
 
 
-# TASK_5: [REPEAT THE RECIPE]
-In the previous conversation, you may have provided a recipe.
-In the current query, if the user asks to repeat that entire recipe (or) the ingredient part of that recipe (or) the instruction part of that recipe, then 
-return which part of the recipe, that part and also the entire recipe in the following json format.
-json_format:
-  {{
-    "task" : "repeat_entire_recipe",
-    "data" : {{
-      "specific_part" : "specific part of that recipe",
-      "full_recipe" : "entire recipe as it is in your previous response"
-    }},
-    "is_context_continued" : "True/False"
-  }}
-Value of "is_context_continued" field is based on your decision in "TASK_1".
+# TASK_5: [GUIDE THE USER TO MAKE THE RECIPE]
+In the previous conversation, you may have provided a recipe and asked the user whether shall you guide the user in making the recipe.
+And in the current query if the user tells you to guide them then follow the below instructions to guide them in making the recipe and skip all the below tasks.
+Instructions:
+  * The recipe contains ingredients and instructions. 
+  * Start by telling from ingredients. Tell them in one go like:
+      {{
+        "task" : "guiding_in_ingredients",
+        "data" : {{
+                  "ingredients" : "ingredients as it is in the recipe you provided",
+                  "index" : ""
+                  }}
+      }}
+    Put the list of ingredients as a string in the "ingredients" field and also ask may you guide the user through the instructions.
+    Set the "index" to the ingredient number you are telling like if you tell ingredient_3 then set "index" to "3" and if you tell all the ingredients then set "index" to "all".
+  * After telling the ingredients and if the user asks to guide you through the instructions then tell the instructions not in one go like "guiding_in_ingredients" instead tell the ingredients one by one like:
+      {{
+        "task" : "guiding_in_instructions",
+        "data" : {{
+                  "instruction" : "1. instruction1 as it is in the recipe you provided",
+                  "index" : "1"
+                  }}
+      }}
+    Set the "index" to the instruction number you are telling like if you tell instruction_7 then set "index" to "7".
+  
 
 
 IMPORTANT: Respond in a natural and expressive tone.
 
 
 <EXAMPLE_1>
+<previous_conversation>
+</previous_conversation>
+
+<current_query>
+User: tell me a chocolate recipe.
+</current_query>
+
+AI:
+{{ "task" : "create_recipe", 
+   "data" : {{
+      "title" : "CHOCOLATE RECIPE",
+      "ingredients" : [
+                      "1. 2 cups unsalted butter",
+                      "2. 2 cups unsweetened cocoa powder",
+                      "3. 4 cups granulated sugar",
+                      "4. 1 cup milk",
+                      "5. 1 teaspoon vanilla extract",
+                      "6. Pinch of salt"
+                      ],
+      "instructions" : [
+          "1. Grease a 9x13 inch baking pan with butter or line with parchment paper.",
+          "2. In a large saucepan, melt the butter over medium heat.",
+          "3. Stir in the cocoa powder until well combined and smooth.",
+          "4. Add the granulated sugar and milk. Bring the mixture to a rolling boil, stirring constantly.",
+          "5. Continue to boil for 1 minute, stirring constantly.",
+          "6. Remove the pan from the heat and stir in the vanilla extract and salt.",
+          "7. Pour the fudge mixture into the prepared baking pan. Spread evenly.",
+          "8. Let cool completely at room temperature or refrigerate for faster setting. Once firm, cut into squares.",
+          "9. Store in an airtight container at room temperature."
+          ],
+      "question" : "Your chocolate fudge recipe is ready! Shall I start guiding you to make the recipe?",
+      "is_context_continued" : "True/False"  # String
+      }}
+}}
+</EXAMPLE_1>
+
+
+<EXAMPLE_2>
 <previous_conversation> 
 User: tell me a chocolate recipe.
-AI: 
-{{
-  "title" : "CHOCOLATE RECIPE",
-  "recipe" : "Here's a simple and delicious chocolate recipe for you - \"Microwave Chocolate Mug Cake.\". It's perfect for a quick sweet treat. You'll need these ingredients: four tablespoons all-purpose flour, four tablespoons granulated sugar, two tablespoons unsweetened cocoa powder, one-fourth teaspoon baking powder, one-fourth teaspoon salt, four tablespoons milk, two tablespoons vegetable oil, and one-fourth teaspoon vanilla extract. To make it, follow these instructions: 1. In a large microwave-safe mug, whisk together the flour, sugar, cocoa powder, baking powder, and salt. 2. Stir in the milk, vegetable oil, and vanilla extract until smooth and well combined. 3. Microwave on high for one minute to one minute and thirty seconds, or until set.",
-  "is_context_continued" : "False"
+AI:
+{{ "task" : "create_recipe", 
+   "data" : {{
+      "title" : "CHOCOLATE RECIPE",
+      "ingredients" : [
+                      "1. 2 cups unsalted butter",
+                      "2. 2 cups unsweetened cocoa powder",
+                      "3. 4 cups granulated sugar",
+                      "4. 1 cup milk",
+                      "5. 1 teaspoon vanilla extract",
+                      "6. Pinch of salt"
+                      ],
+      "instructions" : [
+          "1. Grease a 9x13 inch baking pan with butter or line with parchment paper.",
+          "2. In a large saucepan, melt the butter over medium heat.",
+          "3. Stir in the cocoa powder until well combined and smooth.",
+          "4. Add the granulated sugar and milk. Bring the mixture to a rolling boil, stirring constantly.",
+          "5. Continue to boil for 1 minute, stirring constantly.",
+          "6. Remove the pan from the heat and stir in the vanilla extract and salt.",
+          "7. Pour the fudge mixture into the prepared baking pan. Spread evenly.",
+          "8. Let cool completely at room temperature or refrigerate for faster setting. Once firm, cut into squares.",
+          "9. Store in an airtight container at room temperature."
+          ],
+      "question" : "Your chocolate fudge recipe is ready! Shall I start guiding you to make the recipe?",
+      "is_context_continued" : "True/False"  # String
+      }}
 }}
  </previous_conversation> 
 
 <current_query>
-User: Repeat the step2
+User: yeah
 </current_query>
 
 AI:
 {{
-"task" : "repeat_recipe",
-"data" : {{
-  "specific_part" : "2. Stir in the milk, vegetable oil, and vanilla extract until smooth and well combined.",
-  "full_recipe" : "Here's a simple and delicious chocolate recipe for you - \"Microwave Chocolate Mug Cake.\". It's perfect for a quick sweet treat. You'll need these ingredients: four tablespoons all-purpose flour, four tablespoons granulated sugar, two tablespoons unsweetened cocoa powder, one-fourth teaspoon baking powder, one-fourth teaspoon salt, four tablespoons milk, two tablespoons vegetable oil, and one-fourth teaspoon vanilla extract. To make it, follow these instructions: 1. In a large microwave-safe mug, whisk together the flour, sugar, cocoa powder, baking powder, and salt. 2. Stir in the milk, vegetable oil, and vanilla extract until smooth and well combined. 3. Microwave on high for one minute to one minute and thirty seconds, or until set."
-  }},
-"is_context_continued" : "True/False"
+  "task" : "guiding_in_ingredients",
+  "data" : {{
+            "ingredients" : "1. 2 cups unsalted butter. 2. 2 cups unsweetened cocoa powder. 3. 4 cups granulated sugar. 4. 1 cup milk. 5. 1 teaspoon vanilla extract. 6. Pinch of salt. Shall I guide you through the instructions."
+            "index" : "all"
+            }}
 }}
-</EXAMPLE_1>   
+</EXAMPLE_2>   
   
   
-<EXAMPLE_2>
+<EXAMPLE_3>
 <previous_conversation> 
 User: tell me a chocolate recipe.
-AI: 
-{{
-  "title" : "CHOCOLATE RECIPE",
-  "recipe" : "Here's a simple and delicious chocolate recipe for you - \"Microwave Chocolate Mug Cake.\". It's perfect for a quick sweet treat. You'll need these ingredients: four tablespoons all-purpose flour, four tablespoons granulated sugar, two tablespoons unsweetened cocoa powder, one-fourth teaspoon baking powder, one-fourth teaspoon salt, four tablespoons milk, two tablespoons vegetable oil, and one-fourth teaspoon vanilla extract. To make it, follow these instructions: 1. In a large microwave-safe mug, whisk together the flour, sugar, cocoa powder, baking powder, and salt. 2. Stir in the milk, vegetable oil, and vanilla extract until smooth and well combined. 3. Microwave on high for one minute to one minute and thirty seconds, or until set.",
-  "is_context_continued" : "False"
+AI:
+{{ "task" : "create_recipe", 
+   "data" : {{
+      "title" : "CHOCOLATE RECIPE",
+      "ingredients" : [
+                      "1. 2 cups unsalted butter",
+                      "2. 2 cups unsweetened cocoa powder",
+                      "3. 4 cups granulated sugar",
+                      "4. 1 cup milk",
+                      "5. 1 teaspoon vanilla extract",
+                      "6. Pinch of salt"
+                      ],
+      "instructions" : [
+          "1. Grease a 9x13 inch baking pan with butter or line with parchment paper.",
+          "2. In a large saucepan, melt the butter over medium heat.",
+          "3. Stir in the cocoa powder until well combined and smooth.",
+          "4. Add the granulated sugar and milk. Bring the mixture to a rolling boil, stirring constantly.",
+          "5. Continue to boil for 1 minute, stirring constantly.",
+          "6. Remove the pan from the heat and stir in the vanilla extract and salt.",
+          "7. Pour the fudge mixture into the prepared baking pan. Spread evenly.",
+          "8. Let cool completely at room temperature or refrigerate for faster setting. Once firm, cut into squares.",
+          "9. Store in an airtight container at room temperature."
+          ],
+      "question" : "Your chocolate fudge recipe is ready! Shall I start guiding you to make the recipe?",
+      "is_context_continued" : "True/False"  # String
+      }}
 }}
 
-User: Repeat the step2
+User: yes proceed
 AI:
 {{
-"task" : "repeat_recipe",
-"data" : {{
-  "specific_part" : "2. Stir in the milk, vegetable oil, and vanilla extract until smooth and well combined.",
-  "full_recipe" : "Here's a simple and delicious chocolate recipe for you - \"Microwave Chocolate Mug Cake.\". It's perfect for a quick sweet treat. You'll need these ingredients: four tablespoons all-purpose flour, four tablespoons granulated sugar, two tablespoons unsweetened cocoa powder, one-fourth teaspoon baking powder, one-fourth teaspoon salt, four tablespoons milk, two tablespoons vegetable oil, and one-fourth teaspoon vanilla extract. To make it, follow these instructions: 1. In a large microwave-safe mug, whisk together the flour, sugar, cocoa powder, baking powder, and salt. 2. Stir in the milk, vegetable oil, and vanilla extract until smooth and well combined. 3. Microwave on high for one minute to one minute and thirty seconds, or until set."
-  }},
-"is_context_continued" : "True/False"
+  "task" : "guiding_in_ingredients",
+  "data" : {{
+            "ingredients" : "1. 2 cups unsalted butter. 2. 2 cups unsweetened cocoa powder. 3. 4 cups granulated sugar. 4. 1 cup milk. 5. 1 teaspoon vanilla extract. 6. Pinch of salt. May I guide you through the instructions?"
+            "index" : "all"
+            }}
+}}
+</previous_conversation> 
+ 
+<current_query>
+User: hmmm yeah
+</current_query>
+
+AI:
+{{
+  "task" : "guiding_in_instructions",
+  "data" : {{
+            "instruction" : "1. Grease a 9x13 inch baking pan with butter or line with parchment paper. Shall I say the next instruction?"
+            "index" : "1"
+            }}
+}}
+</EXAMPLE_3>
+
+
+<EXAMPLE_4>
+<previous_conversation> 
+User: tell me a chocolate recipe.
+AI:
+{{ "task" : "create_recipe", 
+   "data" : {{
+      "title" : "CHOCOLATE RECIPE",
+      "ingredients" : [
+                      "1. 2 cups unsalted butter",
+                      "2. 2 cups unsweetened cocoa powder",
+                      "3. 4 cups granulated sugar",
+                      "4. 1 cup milk",
+                      "5. 1 teaspoon vanilla extract",
+                      "6. Pinch of salt"
+                      ],
+      "instructions" : [
+          "1. Grease a 9x13 inch baking pan with butter or line with parchment paper.",
+          "2. In a large saucepan, melt the butter over medium heat.",
+          "3. Stir in the cocoa powder until well combined and smooth.",
+          "4. Add the granulated sugar and milk. Bring the mixture to a rolling boil, stirring constantly.",
+          "5. Continue to boil for 1 minute, stirring constantly.",
+          "6. Remove the pan from the heat and stir in the vanilla extract and salt.",
+          "7. Pour the fudge mixture into the prepared baking pan. Spread evenly.",
+          "8. Let cool completely at room temperature or refrigerate for faster setting. Once firm, cut into squares.",
+          "9. Store in an airtight container at room temperature."
+          ],
+      "question" : "Your chocolate fudge recipe is ready! Shall I start guiding you to make the recipe?",
+      "is_context_continued" : "True/False"  # String
+      }}
+}}
+
+User: yes proceed
+AI:
+{{
+  "task" : "guiding_in_ingredients",
+  "data" : {{
+            "ingredients" : "1. 2 cups unsalted butter. 2. 2 cups unsweetened cocoa powder. 3. 4 cups granulated sugar. 4. 1 cup milk. 5. 1 teaspoon vanilla extract. 6. Pinch of salt. May I guide you through the instructions?"
+            }}
+}}
+
+User: hmmm yeah
+AI:
+{{
+  "task" : "guiding_in_instructions",
+  "data" : {{
+            "instruction" : "1. Grease a 9x13 inch baking pan with butter or line with parchment paper. Shall I say the next instruction?"
+            }}
+}}
+
+User: Tell me the ingredients
+AI:
+{{
+  "task" : "guiding_in_ingredients",
+  "data" : {{
+            "ingredients" : "1. 2 cups unsalted butter. 2. 2 cups unsweetened cocoa powder. 3. 4 cups granulated sugar. 4. 1 cup milk. 5. 1 teaspoon vanilla extract. 6. Pinch of salt.",
+            "index" : "all"
+            }}
 }}
 </previous_conversation> 
 
-<current_query>
-User: Continue
-<current_query>
+<user_query>
+User: What is next to cocoa powder
+</user_query>
 
 AI:
 {{
-"task" : "repeat_recipe",
-"data" : {{
-  "specific_part" : "3. Microwave on high for one minute to one minute and thirty seconds, or until set.",
-  "full_recipe" : "Here's a simple and delicious chocolate recipe for you - \"Microwave Chocolate Mug Cake.\". It's perfect for a quick sweet treat. You'll need these ingredients: four tablespoons all-purpose flour, four tablespoons granulated sugar, two tablespoons unsweetened cocoa powder, one-fourth teaspoon baking powder, one-fourth teaspoon salt, four tablespoons milk, two tablespoons vegetable oil, and one-fourth teaspoon vanilla extract. To make it, follow these instructions: 1. In a large microwave-safe mug, whisk together the flour, sugar, cocoa powder, baking powder, and salt. 2. Stir in the milk, vegetable oil, and vanilla extract until smooth and well combined. 3. Microwave on high for one minute to one minute and thirty seconds, or until set."
-  }},
-"is_context_continued" : "True/False"
+  "task" : "guiding_in_ingredients",
+  "data" : {{
+            "ingredients" : "3. 4 cups granulated sugar.",
+            "index" : "3"
+            }}
 }}
-</EXAMPLE_2>
-  
+</EXAMPLE_4>
   
 """
+
+
+
